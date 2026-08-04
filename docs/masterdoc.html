@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en" class="level-2">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kino masterdoc</title>
+  <style>
+    /* Kino is German for cinema and the icon is a film projector, so the page is the room:
+       black, one warm beam from the upper left, dust in the light. Scroll drives --t from 0
+       to 1 and the lamp warms, the cone widens, the motes drift. No WebGL: a projector beam
+       is two gradients and a mask, and a shader here would be showing off rather than
+       showing something. */
+    :root {
+      --t: 0;
+      --bg: #07060a;
+      --accent: color-mix(in oklab, #b98b4e, #ffd9a0 calc(var(--t) * 100%));
+      --ink: #efe9e2;
+      --muted: #a89e94;
+      --faint: #6d6459;
+      --line: rgba(215, 175, 120, .13);
+      --glass: rgba(12, 10, 14, .68);
+      --serif: 'Charter', 'Bitstream Charter', 'Iowan Old Style', Palatino, Georgia, serif;
+      --sans: 'Inter', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+      --col: min(660px, 92vw);
+      --ease: cubic-bezier(.2, .7, .2, 1);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font: 17px/1.7 var(--serif); overflow-x: hidden; -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---- the beam -------------------------------------------------------
+       One cone from the upper left, brightening with --t. The second gradient is
+       the lamp itself; the third is spill on the far wall. */
+    .beam {
+      position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background:
+        conic-gradient(from 118deg at 6% 4%,
+          transparent 0deg,
+          rgba(255, 208, 145, calc(.015 + var(--t) * .05)) 7deg,
+          rgba(255, 216, 160, calc(.05 + var(--t) * .10)) 13deg,
+          rgba(255, 208, 145, calc(.015 + var(--t) * .05)) 21deg,
+          transparent 28deg),
+        radial-gradient(30vw 30vw at 6% 4%, rgba(255, 198, 128, calc(.10 + var(--t) * .26)), transparent 62%),
+        radial-gradient(90vw 70vh at 88% 92%, rgba(120, 78, 30, calc(.05 + var(--t) * .09)), transparent 70%);
+    }
+
+    /* Dust in the light. Three layers at different rates is the whole parallax. */
+    .motes { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: calc(.22 + var(--t) * .4); }
+    .motes i {
+      position: absolute; border-radius: 50%; background: rgba(255, 224, 180, .5);
+      animation: drift linear infinite;
+    }
+    @keyframes drift {
+      from { transform: translate3d(0, 8vh, 0); }
+      to   { transform: translate3d(4vw, -92vh, 0); }
+    }
+
+    #progress { position: fixed; top: 0; left: 0; height: 1.5px; width: 0; z-index: 60; background: var(--accent); opacity: .8; }
+
+    .topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 50; display: flex; align-items: center; gap: 14px;
+      padding: 10px 18px; background: var(--glass); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line); font: 12px/1 var(--sans);
+    }
+    .topbar .brand { font-weight: 600; letter-spacing: .04em; color: var(--ink); }
+    .topbar .sub { color: var(--faint); }
+    .spacer { flex: 1; }
+    .levels { display: flex; gap: 2px; }
+    .levels button, #navtoc {
+      font: 11px/1 var(--sans); color: var(--muted); background: transparent;
+      border: 1px solid var(--line); border-radius: 5px; padding: 6px 9px; cursor: pointer;
+    }
+    .levels button[aria-pressed="true"] { color: var(--bg); background: var(--accent); border-color: transparent; }
+    #navtoc { display: none; }
+
+    .toc {
+      position: fixed; top: 92px; left: max(18px, calc(50vw - var(--col) / 2 - 208px)); width: 172px; z-index: 40;
+      font: 12px/1.5 var(--sans);
+    }
+    .toc a { color: var(--faint); text-decoration: none; display: block; padding: 3px 0; transition: color .2s; }
+    .toc a:hover { color: var(--muted); }
+    .toc a.here { color: var(--ink); }
+
+    main { width: var(--col); margin: 0 auto; padding: 22vh 0 24vh; }
+
+    .hero h1 { font-size: clamp(38px, 7vw, 66px); line-height: 1.02; letter-spacing: -.026em; margin: 0 0 18px; font-weight: 600; }
+    .hero p { font-size: 20px; color: var(--muted); margin: 0; }
+    .hero .num { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+    .part-head { display: flex; align-items: baseline; gap: 16px; margin: 17vh 0 5vh; padding-top: 3vh; border-top: 1px solid var(--line); }
+    .part-head .pn { font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; color: var(--faint); }
+    .part-head h2 { font-size: clamp(23px, 3.1vw, 29px); font-weight: 600; letter-spacing: -.008em; margin: 0; }
+
+    .block { margin: 0 0 8vh; }
+    .block h3 { font: 600 15px/1.4 var(--sans); letter-spacing: .01em; margin: 0 0 10px; color: var(--ink); }
+    .plain { margin: 0; }
+    .plain + .layer { margin-top: 14px; }
+
+    /* Reading depth. The root carries level-1|2|3; layers appear at their threshold. */
+    .layer { display: none; border-left: 2px solid var(--line); padding-left: 15px; margin-top: 14px; }
+    :root.level-2 .layer.analogy, :root.level-3 .layer.analogy, :root.level-3 .layer.technical { display: block; }
+    .layer summary { font: 600 11px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); cursor: pointer; list-style: none; }
+    .layer summary::-webkit-details-marker { display: none; }
+    .layer[open] summary { margin-bottom: 9px; color: var(--accent); }
+    .layer p:last-child { margin-bottom: 0; }
+
+    code { font: 13.5px var(--mono); color: var(--accent); background: rgba(255, 210, 150, .06); padding: 1px 5px; border-radius: 3px; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font: 13px/1.5 var(--sans); }
+    th, td { text-align: left; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); }
+    th { color: var(--faint); font-weight: 500; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; }
+    td.n { font-family: var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+
+    @media (max-width: 1080px) {
+      .toc { position: fixed; inset: 52px 0 auto; left: 0; width: 100%; background: var(--glass); backdrop-filter: blur(10px);
+             border-bottom: 1px solid var(--line); padding: 14px 18px; display: none; }
+      .toc.open { display: block; }
+      #navtoc { display: block; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .motes i { animation: none; }
+      .motes { opacity: .18; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="beam"></div>
+  <div class="motes" id="motes"></div>
+  <div id="progress"></div>
+
+  <div class="topbar">
+    <span class="brand">Kino</span>
+    <span class="sub">masterdoc</span>
+    <span class="spacer"></span>
+    <button id="navtoc" aria-expanded="false">Contents</button>
+    <div class="levels">
+      <button data-level="1">Simple</button>
+      <button data-level="2" aria-pressed="true">Analogies</button>
+      <button data-level="3">Technical</button>
+    </div>
+  </div>
+
+  <aside class="toc" id="toc">
+    <a href="#what">What it is</a>
+    <a href="#shape">The three commands</a>
+    <a href="#passthrough">Never holding a frame</a>
+    <a href="#numbers">What that costs</a>
+    <a href="#spaces">Living on every desktop</a>
+    <a href="#gate">Knowing when nobody looks</a>
+    <a href="#swap">Play now, improve later</a>
+    <a href="#density">Why encoding takes minutes</a>
+  </aside>
+
+  <main>
+
+    <div class="hero">
+      <h1>A wallpaper that never<br>holds a picture.</h1>
+      <p>4K video on the desktop for <span class="num">18 MB</span> and about one percent of a core.</p>
+    </div>
+
+    <div class="part-head" id="part1"><span class="pn">I</span>
+      <h2>The thing itself</h2>
+    </div>
+
+    <section class="block" id="what">
+      <h3>What it is</h3>
+      <p class="plain">Kino plays video as your desktop wallpaper. It draws Apple's aerial footage, the drone shots of
+        coastlines and cities you see on an Apple TV, underneath your icons and windows. What makes it worth writing
+        about is not that it does this, but how little of your machine it uses while doing it.</p>
+      <details class="layer analogy" open>
+        <summary>Analogy</summary>
+        <p>Most video players are a chef who unpacks the whole delivery onto the counter before cooking. Kino passes
+          each sealed box straight to the kitchen next door and never opens one. The boxes are small; the unpacked
+          ingredients are enormous; and the kitchen next door was going to unpack them anyway.</p>
+      </details>
+      <details class="layer technical">
+        <summary>Technical</summary>
+        <p>One borderless <code>NSWindow</code> per screen, one level above the desktop icon layer, hosting an
+          <code>AVSampleBufferDisplayLayer</code> driven by an <code>AVSampleBufferRenderSynchronizer</code>. It
+          replaces the <code>idleassetsd</code> and <code>WallpaperVideoExtension</code> path entirely, which keeps a
+          managed asset store and a resident decoder with no exposed control over either.</p>
+      </details>
+    </section>
+
+    <section class="block" id="shape">
+      <h3>The three commands</h3>
+      <p class="plain">One program does three jobs: it runs as the wallpaper, it converts video files into a form
+        that plays cheaply, and it fetches Apple's list of available clips.</p>
+      <details class="layer analogy" open>
+        <summary>Analogy</summary>
+        <p>A projectionist, a film lab, and a catalogue in one person. The projectionist runs continuously; the lab and
+          the catalogue are called on when there is new material.</p>
+      </details>
+      <details class="layer technical">
+        <summary>Technical</summary>
+        <p><code>kino play</code> is the agent and the no-argument default. <code>kino prep</code> is the transcoder,
+          shelled out to as a subprocess so an encoder failure cannot take the agent with it. <code>kino catalog</code>
+          imports Apple's macOS aerial manifest. <code>main.swift</code> dispatches on <code>argv[1]</code> and sets
+          line buffering first, because launchd redirects stdout to a file where block buffering hides every line until
+          the process dies.</p>
+      </details>
+    </section>
+
+    <div class="part-head" id="part2"><span class="pn">II</span>
+      <h2>Why it is small</h2>
+    </div>
+
+    <section class="block" id="passthrough">
+      <h3>Never holding a frame</h3>
+      <p class="plain">A single frame of 4K video, once decoded, is about 24 megabytes. A video player normally holds
+        several at once. Kino holds none. It reads the compressed data, which is a few tens of kilobytes per frame, and
+        hands it to the part of macOS that was going to decode it anyway. The finished pictures live in memory that
+        belongs to the system, not to Kino.</p>
+      <details class="layer analogy" open>
+        <summary>Analogy</summary>
+        <p>Think of the difference between carrying a folded map and carrying the landscape. The compressed frame is
+          the folded map: small, and useless until something unfolds it. Kino never unfolds it. It hands the folded map
+          through a window to someone whose job is unfolding, and that person keeps the landscape on their own desk.</p>
+      </details>
+      <details class="layer technical">
+        <summary>Technical</summary>
+        <p><code>AVAssetReaderTrackOutput</code> constructed with <code>outputSettings: nil</code> is the whole
+          mechanism. Passthrough mode yields <code>CMSampleBuffer</code>s carrying compressed samples; decode happens
+          inside the display layer's own VideoToolbox session, against IOSurfaces the compositor already owns and which
+          are charged to no process. The file stays on disk and is read through the unified buffer cache, where pages
+          are purgeable. No display link is involved, so none of the clock-death behaviour that bites a window-tied
+          <code>CAMetalDisplayLink</code> applies.</p>
+      </details>
+    </section>
+
+    <section class="block" id="numbers">
+      <h3>What that costs</h3>
+      <p class="plain">Playing 2940x1912 video costs about 18 megabytes and one percent of a processor core. When a
+        fullscreen app hides the desktop, the processor cost drops to zero. The memory number does not change if you
+        add a hundred more clips, or make the cache bigger, or raise the resolution.</p>
+      <table>
+        <tr><th>Measure</th><th>Value</th></tr>
+        <tr><td>Physical footprint</td><td class="n">18 MB</td></tr>
+        <tr><td>CPU, playing</td><td class="n">~1% of one core</td></tr>
+        <tr><td>CPU, gated</td><td class="n">0.0%</td></tr>
+        <tr><td>IOSurface pages charged here</td><td class="n">none</td></tr>
+      </table>
+      <details class="layer analogy" open>
+        <summary>Analogy</summary>
+        <p>The library does not get heavier as you add books, because you are holding a card catalogue rather than the
+          books. Only one book is ever open.</p>
+      </details>
+      <details class="layer technical">
+        <summary>Technical</summary>
+        <p>Memory is invariant to library size because exactly one <code>AVAssetReader</code> is open at a time, and
+          18 MB is close to framework baseline for an AppKit and AVFoundation process. The figure is
+          <code>phys_footprint</code>, not RSS: RSS reads around 52 MB here and the difference is shared and
+          file-backed pages counted against every process that touches them. Any memory claim quoting RSS for this kind
+          of work is quoting the wrong number.</p>
+      </details>
+    </section>
+
+    <div class="part-head" id="part3"><span class="pn">III</span>
+      <h2>Arguing with the compositor</h2>
+    </div>
+
+    <section class="block" id="spaces">
+      <h3>Living on every desktop</h3>
+      <p class="plain">macOS lets you have several desktops and swipe between them. A wallpaper has to be on all of
+        them. The obvious way to ask for that turns out to fight with the swipe animation, and the symptom is bizarre:
+        instead of a missing wallpaper you get thrown onto a different desktop entirely.</p>
+      <details class="layer analogy" open>
+        <summary>Analogy</summary>
+        <p>Telling someone "stand in every room" and "do not move" at the same time. During a moment when two rooms are
+          both visible, there is no position that satisfies both instructions, so the building picks a room for them
+          and drags you into it.</p>
+      </details>
+      <details class="layer technical">
+        <summary>Technical</summary>
+        <p><code>collectionBehavior</code> is <code>[.ignoresCycle]</code> and nothing more. Space membership comes
+          from the private <code>CGSAddWindowsToSpaces</code>, given every Space of <code>type == 0</code>; fullscreen
+          Spaces are excluded so the wallpaper never covers a fullscreen app. Three flags were removed for the same
+          reason in turn: <code>.fullScreenNone</code> took a fullscreen cycle from 4 space changes to 11,
+          <code>.stationary</code> threw the desktop rightward on an adjacent swipe, and
+          <code>.canJoinAllSpaces</code> keeps one window and moves it to whichever Space became current, so mid-swipe
+          the destination has nothing to composite.</p>
+        <p>Registration must be renewed after every <code>orderFront</code>, because ordering out drops it and a window
+          belonging to no Space never appears. It must not run on a space change, because mutating membership during a
+          transition drags the active Space exactly as the flags did.</p>
+      </details>
+    </section>
+
+    <section class="block" id="gate">
+      <h3>Knowing when nobody looks</h3>
+      <p class="plain">There is no point decoding video that a fullscreen app is covering. Kino asks the window server
+        whether its own window is visible, and stops when it is not. Finding a question the system would answer
+        honestly took three attempts.</p>
+      <details class="layer analogy" open>
+        <summary>Analogy</summary>
+        <p>Asking "am I on stage?" rather than "is the curtain down?" The first has one answer. The second depends on
+          which curtain, and the theatre will happily describe a curtain that does not reach the floor.</p>
+      </details>
+      <details class="layer technical">
+        <summary>Technical</summary>
+        <p><code>Coverage.isVisible</code> reads <code>kCGWindowIsOnscreen</code> for Kino's own window. Two earlier
+          approaches failed: <code>NSWindow.occlusionState</code> reports raw 8192 with <code>.visible</code> never set
+          below normal window level and emits no notification; and testing whether a layer-0 window contains
+          <code>CGDisplayBounds</code> never matches, because a real fullscreen window measures (0, 33, 1470, 923)
+          against display bounds of (0, 0, 1470, 956).</p>
+        <p>The query is a synchronous IPC into WindowServer, which is also the process compositing the video, so it
+          runs off the main thread. Gating is asymmetric: becoming visible applies at once, becoming hidden waits
+          0.75s behind a generation counter, because a window animating to full size reports not-covering for a beat.</p>
+      </details>
+    </section>
+
+    <div class="part-head" id="part4"><span class="pn">IV</span>
+      <h2>The pipeline</h2>
+    </div>
+
+    <section class="block" id="swap">
+      <h3>Play now, improve later</h3>
+      <p class="plain">Apple's clips arrive as very large files. Converting one into something cheap to play takes
+        minutes. Rather than making you wait, Kino plays the large file immediately and swaps in the converted version
+        later, at a moment when the picture was going to change anyway.</p>
+      <details class="layer analogy" open>
+        <summary>Analogy</summary>
+        <p>A restaurant serving bread while the meal cooks. Swapping plates mid-mouthful would be worse than the wait,
+          so the exchange happens between courses and nobody notices it happened.</p>
+      </details>
+      <details class="layer technical">
+        <summary>Technical</summary>
+        <p>A fetch lands the master in about 1.5 seconds, writes it into the catalogue, and pushes it into the playlist
+          immediately. <code>conform</code> rewrites the same path, and since every clip is re-read from disk when it
+          comes round, the encoded version takes over at a loop or track change. Forcing the swap mid-clip was built
+          and removed: it flushed the sample queue and rewound up to a GOP, because a passthrough reader cannot begin
+          mid-GOP and <code>timeRange</code> falls back to the preceding sync sample.</p>
+      </details>
+    </section>
+
+    <section class="block" id="density">
+      <h3>Why encoding takes minutes</h3>
+      <p class="plain">Apple's newer clips run at 240 frames per second, eight times normal video. Converting two
+        minutes of that means processing the same number of frames as nine minutes of ordinary footage. The encoder is
+        not slow; there is simply a great deal of it.</p>
+      <table>
+        <tr><th>Frames kept</th><th>Output rate</th><th>Wall clock</th><th>vs realtime</th></tr>
+        <tr><td>1.0</td><td class="n">239.76</td><td class="n">305s</td><td class="n">2.23x</td></tr>
+        <tr><td>0.5</td><td class="n">119.88</td><td class="n">210s</td><td class="n">1.53x</td></tr>
+        <tr><td>0.25</td><td class="n">59.94</td><td class="n">106s</td><td class="n">0.77x</td></tr>
+      </table>
+      <details class="layer analogy" open>
+        <summary>Analogy</summary>
+        <p>Copying a book by hand is not slow because your writing is slow. It is slow because of how many words there
+          are. Asking for fewer words is the only lever that matters.</p>
+      </details>
+      <details class="layer technical">
+        <summary>Technical</summary>
+        <p>Measured against a 137s master of 32,865 frames, encoded to 2940x1912. Decode is an irreducible floor of
+          roughly 116s: every source frame must be decoded even when it is about to be discarded, because inter-frame
+          prediction means you cannot skip to frame N without the frames before it. Encode throughput is about 78
+          frames per second at that size, and cost is linear in <em>output</em> pixels; the scaler itself is free,
+          measured at 1.4% over feeding it native directly.</p>
+        <p>Only <code>framesKept: 0.25</code> finishes ahead of playback. Conforms run strictly one at a time at
+          background quality of service: three concurrent hardware encodes contend for the same media engine, and the
+          contention is visible as dropped frames.</p>
+      </details>
+    </section>
+
+  </main>
+
+  <script>
+    const root = document.documentElement;
+
+    const setLevel = n => {
+      root.classList.remove('level-1', 'level-2', 'level-3');
+      root.classList.add('level-' + n);
+      document.querySelectorAll('[data-level]').forEach(b =>
+        b.setAttribute('aria-pressed', String(+b.dataset.level === n)));
+      // opening the layers that just became visible saves a second click
+      document.querySelectorAll('.layer').forEach(d => { if (d.offsetParent !== null) d.open = true; });
+    };
+    document.querySelectorAll('[data-level]').forEach(b =>
+      b.addEventListener('click', () => setLevel(+b.dataset.level)));
+
+    const progress = document.getElementById('progress');
+    const links = new Map([...document.querySelectorAll('.toc a')].map(a => [a.getAttribute('href').slice(1), a]));
+    const blocks = [...document.querySelectorAll('.block')];
+    let ticking = false;
+
+    const onScroll = () => {
+      ticking = false;
+      const max = document.body.scrollHeight - innerHeight;
+      const t = max > 0 ? Math.min(1, scrollY / max) : 0;
+      root.style.setProperty('--t', t.toFixed(4));
+      progress.style.width = (t * 100).toFixed(2) + '%';
+
+      let here = blocks[0];
+      for (const b of blocks) if (b.getBoundingClientRect().top < innerHeight * 0.45) here = b;
+      links.forEach(a => a.classList.remove('here'));
+      links.get(here.id)?.classList.add('here');
+    };
+    addEventListener('scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(onScroll); } }, { passive: true });
+
+    const toc = document.getElementById('toc'), nav = document.getElementById('navtoc');
+    nav.addEventListener('click', () => nav.setAttribute('aria-expanded', String(toc.classList.toggle('open'))));
+    toc.addEventListener('click', e => { if (e.target.tagName === 'A') toc.classList.remove('open'); });
+
+    addEventListener('keydown', e => {
+      if (e.key >= '1' && e.key <= '3' && !e.metaKey && !e.ctrlKey) setLevel(+e.key);
+    });
+
+    // dust: seeded by index so the field is stable across reloads rather than random
+    const motes = document.getElementById('motes');
+    for (let i = 0; i < 44; i++) {
+      const m = document.createElement('i');
+      const s = 1 + (i % 5) * 0.7;
+      m.style.width = m.style.height = s.toFixed(1) + 'px';
+      m.style.left = ((i * 37) % 100) + '%';
+      m.style.top = ((i * 61) % 100) + '%';
+      m.style.animationDuration = (26 + (i % 7) * 9) + 's';
+      m.style.animationDelay = '-' + (i * 1.7).toFixed(1) + 's';
+      m.style.opacity = (0.25 + (i % 4) * 0.18).toFixed(2);
+      motes.appendChild(m);
+    }
+
+    setLevel(2);
+    onScroll();
+  </script>
+
+</body>
+
+</html>
