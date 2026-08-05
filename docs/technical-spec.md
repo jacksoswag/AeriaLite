@@ -27,6 +27,7 @@ One executable, three commands.
 | `DesktopWindow.swift` | the borderless window and its level |
 | `Spaces.swift` | private CGS calls placing the window on every ordinary Space |
 | `Coverage.swift` | whether our own window is on screen |
+| `AppleWallpaper.swift` | culls macOS's own wallpaper agent at launch, restores it on quit |
 | `Catalog.swift` | `wallpapers.json` model, ordering, filtering |
 | `Settings.swift` | `config.json` model, resolution presets |
 | `Library.swift` | path resolution, fetch, conform, cache eviction |
@@ -66,6 +67,16 @@ Gating is asymmetric. Becoming visible applies at once; becoming hidden waits 0.
 Any `collectionBehavior` flag that also claims a Space drags the active one while a transition resolves. `.fullScreenNone` took a fullscreen cycle from 4 space changes to 11. `.stationary` threw the desktop rightward on an adjacent swipe, because an adjacent swipe renders both Spaces at once and a window required on both while forbidden to move has no valid position.
 
 Registration happens at window creation and again after every `orderFront`, never on a space change. Ordering out drops the registration, so a window brought back without re-registering belongs to no Space and never shows. Re-registering *during* a transition drags the active Space, which is the same failure as the flags.
+
+## Apple's wallpaper agent
+
+`AppState.init` takes `com.apple.wallpaper.agent` out of the login domain before the cache pass, since a live agent rewrites what was just deleted. Its window sits under Kino's, so a configured aerial holds a second decoder open behind a picture nobody can see.
+
+Killing the processes does nothing on its own: launchd has the agent back inside two seconds. `launchctl bootout gui/<uid>/com.apple.wallpaper.agent` is what makes it stay dead for the session. The ExtensionKit extensions are separate processes that outlive the agent, so a `pkill -u <uid> -f` on `WallpaperAgent|WallpaperAerialsExtension` follows it, catching both those and the plugin processes running out of `WallpaperAgent.app`. `wallpaperexportd` is root-owned and left alone, and `idleassetsd` downloads assets rather than drawing them, so neither is touched.
+
+Quitting bootstraps the job back and kickstarts it, because bootstrap alone registers an on-demand job that draws nothing. That path exists only because `App` puts a `DispatchSourceSignal` on SIGTERM: AppKit leaves the default action in place, so launchd stopping the agent would skip `applicationWillTerminate` entirely and leave the desktop with no wallpaper of either kind.
+
+The menu bar's auto-reveal strip tints from the desktop picture rather than from what is on screen, so culling the agent removes any chance of that band ever matching the video.
 
 ## Threading
 

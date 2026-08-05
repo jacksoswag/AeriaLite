@@ -12,6 +12,8 @@ macOS routes video wallpapers through `idleassetsd` and a `WallpaperVideoExtensi
 
 Kino is one borderless `NSWindow` per screen hosting an `AVSampleBufferDisplayLayer`, using public AppKit and AVFoundation plus one private call to place the window on every Space.
 
+Starting it boots `com.apple.wallpaper.agent` out of the login session, so nothing of Apple's is decoding behind a picture you cannot see. Killing it alone does nothing, since launchd has it back in under two seconds. Quitting Kino bootstraps the agent back and hands the desktop over.
+
 ## How it stays small
 
 `AVAssetReaderTrackOutput` with `outputSettings: nil` is the whole trick. Passthrough yields sample buffers of a few tens of KB rather than 24 MB frames, and decode happens inside the display layer's own VideoToolbox session. The file stays on disk and is read through the unified buffer cache, where pages are purgeable and belong to nobody.

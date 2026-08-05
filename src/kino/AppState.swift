@@ -32,6 +32,7 @@ import Combine
 
     init() {
         Paths.ensure()
+        AppleWallpaper.cull()
         Library.clearAppleWallpaperCaches()
         Settings.seedIfMissing()
         settings = Settings.load()

@@ -8,6 +8,7 @@ import SwiftUI
     private var status: NSStatusItem!
     private let popover = NSPopover()
     private var outside: Any?           // global mouse monitor, live only while the panel is up
+    private var sigterm: DispatchSourceSignal?
     private let state = AppState()
 
     static func run() -> Never {
@@ -20,14 +21,23 @@ import SwiftUI
         exit(0)
     }
 
-    /// Quitting hands the desktop back to macOS. The streamed cache is throwaway by definition and
-    /// downloads are not, so only the former goes; anything macOS cached for Kino goes with it.
+    /// Quitting hands the desktop back to macOS, agent included. The streamed cache is throwaway
+    /// by definition and downloads are not, so only the former goes; anything macOS cached for
+    /// Kino goes with it.
     func applicationWillTerminate(_ note: Notification) {
         Library.clearCache()
         Library.clearAppleWallpaperCaches()
+        AppleWallpaper.restore()
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // AppKit leaves SIGTERM at its default action, so launchd stopping the agent would skip
+        // applicationWillTerminate and leave the desktop with no wallpaper of either kind
+        signal(SIGTERM, SIG_IGN)
+        sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        sigterm?.setEventHandler { NSApplication.shared.terminate(nil) }
+        sigterm?.resume()
+
         popover.behavior = .transient
         popover.setValue(true, forKey: "shouldHideAnchor")   // drops the arrow pointing at the status item
         // the panel is built on first open, so SwiftUI stays out of the process for anyone who

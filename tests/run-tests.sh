@@ -25,6 +25,7 @@ setup() {
 }
 
 probe() { ffprobe -v error -select_streams v:0 -show_entries "$1" -of default=nk=1:nw=1 "$2"; }
+agent() { launchctl print "gui/$UID/com.apple.wallpaper.agent" >/dev/null 2>&1 && echo up || echo gone; }
 
 smoke() {
   local out="$WORK/source.kino.mp4"
@@ -55,6 +56,8 @@ perf() {
   sleep 5
   if ! kill -0 $pid 2>/dev/null; then echo "  FAIL  renderer died: $(cat "$WORK/play.log")"; FAILED=$((FAILED + 1)); return; fi
 
+  check "apple agent while playing" "$(agent)" "gone"
+
   local state; state="$(grep -c playing "$WORK/play.log")"
   if [ "$state" -eq 0 ]; then
     echo "  SKIP  gated (fullscreen space or a stuck full-display overlay), cost numbers meaningless"
@@ -63,6 +66,8 @@ perf() {
   for _ in 1 2 3 4 5 6; do ps -o rss=,pcpu= -p $pid; sleep 2; done
   echo "  footprint: $(/usr/bin/footprint -p $pid 2>/dev/null | grep phys_footprint: | tr -s ' ')"
   kill $pid 2>/dev/null; wait $pid 2>/dev/null
+  sleep 1
+  check "apple agent after quit" "$(agent)" "up"
 }
 
 setup
