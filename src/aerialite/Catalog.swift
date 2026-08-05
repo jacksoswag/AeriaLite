@@ -42,15 +42,36 @@ struct Entry: Codable, Identifiable, Hashable {
 
 /// What the header's filter button selects. Multiselect and unioned, so Favorites plus
 /// Downloaded shows both sets rather than their overlap.
-enum Filter: String, CaseIterable, Identifiable {
+enum Filter: String, CaseIterable, Identifiable, Codable {
     case all = "All", favorites = "Favorites", downloaded = "Downloaded"
     var id: String { rawValue }
+
+    /// Case-insensitive, because defaultView is typed by hand into config.json
+    static func named(_ text: String) -> Filter? {
+        allCases.first { $0.rawValue.caseInsensitiveCompare(text) == .orderedSame }
+    }
 }
 
 /// wallpapers.json. Owned by the panel: every mutation writes straight back, so nobody has to
 /// open the file to change what plays.
 struct Catalog: Codable {
     var entries: [Entry] = []
+    /// The filter the panel was left on, so a relaunch comes back to the same queue. Lives here
+    /// rather than in config.json, which is hand-edited and never written back.
+    var view: Set<Filter> = [.all]
+
+    init() {}
+
+    /// Decoded field by field: the synthesised initialiser treats a defaulted property as a
+    /// required key, so a wallpapers.json written before `view` existed would fail to parse and
+    /// take the whole library with it. Unknown filter names are dropped rather than thrown.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        entries = try c.decodeIfPresent([Entry].self, forKey: .entries) ?? []
+        let names = try c.decodeIfPresent([String].self, forKey: .view) ?? []
+        view = Set(names.compactMap(Filter.named))
+        if view.isEmpty { view = [.all] }
+    }
 
     static func load() -> Catalog {
         guard let data = try? Data(contentsOf: Paths.catalog),

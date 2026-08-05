@@ -59,9 +59,19 @@ struct Settings: Codable {
     /// is missing, 2 streams everything and falls back to this clip.s own downloaded copy when
     /// the link cannot carry it. The fallback is always the same wallpaper, never a different one.
     var streamMode = 1
+    /// Filter names the panel opens on every launch. Empty leaves it on whatever view was last
+    /// used, which the catalogue remembers.
+    var defaultView: [String] = []
     static let slowBitsPerSecond = 5_000_000.0
 
     var onFullscreen: Fullscreen { Fullscreen(rawValue: playWhileFullscreen) ?? .pause }
+
+    /// nil when unset or when nothing in it names a real filter, which is what lets the caller
+    /// fall through to the remembered view instead of opening on an empty list.
+    var openingView: Set<Filter>? {
+        let picked = Set(defaultView.compactMap(Filter.named))
+        return picked.isEmpty ? nil : picked
+    }
 
     init() {}
 
@@ -73,6 +83,10 @@ struct Settings: Codable {
         playWhileFullscreen = try c.decodeIfPresent(Int.self, forKey: .playWhileFullscreen) ?? playWhileFullscreen
         maxCache = try c.decodeIfPresent(Cache.self, forKey: .maxCache) ?? maxCache
         streamMode = try c.decodeIfPresent(Int.self, forKey: .streamMode) ?? streamMode
+        // one name or several, since a single view is the common case and quoting it as a bare
+        // string is what anyone hand-editing this reaches for first
+        if let one = try? c.decodeIfPresent(String.self, forKey: .defaultView) { defaultView = [one] }
+        else if let many = try? c.decodeIfPresent([String].self, forKey: .defaultView) { defaultView = many }
     }
 
     static func load() -> Settings {

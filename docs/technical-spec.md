@@ -146,13 +146,17 @@ Everything lives under `~/Library/Application Support/AeriaLite/`.
 | Path | Holds |
 | --- | --- |
 | `config.json` | hand-edited settings, never written by the panel |
-| `wallpapers.json` | the catalogue, fully owned by the panel |
+| `wallpapers.json` | the catalogue and the view it was left on, fully owned by the panel |
 | `Wallpapers/` | the streamed cache, cleared on quit |
 | `Wallpapers/persistent/` | downloads, never evicted |
 
 The whole root is bounded. Downloads land conformed at 1080p under a 2.5 Mbps cap and trimmed at 180 seconds, which measures 47 MB a clip against Apple's 145 MB masters, and the streamed half is evicted least-recently-used against `maxCache`. A 15-clip library measured 711 MB; the same 15 masters would be 2.2 GB and the full 152-clip catalogue about 22 GB.
 
 `Paths.ensure` moves `Application Support/Kino` to the current root when the old one exists and the new one does not, and `Migration.repoint` rewrites the absolute paths the catalogue stored under it. Both are one-shot and both can go once no install predates the rename.
+
+The filter is restored at launch from `wallpapers.json`, and `defaultView` in `config.json` overrides it when set, naming one filter or an array of them and matched case-insensitively. It overrides without recording, so removing the key returns to the remembered view. `AppState.select` is the only writer: persisting from the `filters` observer instead also catches the launch assignment, because a property with a default is already initialised by the time `init` runs, and `defaultView` would overwrite the view it stands in for.
+
+`Catalog` decodes field by field for the same reason `Entry` and `Settings` do. The synthesised initialiser treats a defaulted property as a required key, so a `wallpapers.json` written before `view` existed would fail to parse and take the whole library with it.
 
 A malformed `config.json` falls back to defaults rather than being rewritten over the top of someone's work. `Entry.source.path` is the whole availability test: nothing is inferred from a folder, so a hand-pointed file anywhere works exactly like a downloaded one, and renaming an entry cannot break playback because the filename never moves.
 

@@ -79,11 +79,14 @@ aerialite prep <input> [-o out] [--keep 0-1] [--size WxH] [--bitrate BPS] [--key
   "maxCache":  { "space": "3000", "videos": 2, "capAtHigh": false },
   "streamMode": 1,
   "playWhileFullscreen": 1,
+  "defaultView": "Favorites",
   "defSpeed": 1
 }
 ```
 
 `framesKept` is a fraction of the source's own frames, so `0.5` halves a 239.76fps master to 119.88 without touching duration or speed. `resolution` is `native`, `1080p` or `4k`; native means the display's backing store, which on a scaled Retina panel is neither the point size nor the panel size. A `bitrate` of 0 or absent matches the source's own bits per pixel.
+
+`defaultView` pins the panel to a filter on every launch, one of `All`, `Favorites`, `Downloaded`, or an array of them. Leave the key out and it reopens on whatever view you left it on, which `wallpapers.json` remembers. Either way the view is the queue: a clip filtered out goes off the screen and out of the rotation together.
 
 `streamMode` decides where a clip comes from: `0` plays only what is on disk and greys the rest, `1` prefers `persistent/` and fetches what is missing, `2` streams everything and falls back to that clip's own downloaded copy when the link cannot carry it. `playWhileFullscreen` runs 0 stop, 1 pause, 2 ignore.
 

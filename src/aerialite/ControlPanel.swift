@@ -170,10 +170,10 @@ struct ControlPanel: View {
                         get: { state.filters.contains(option) },
                         set: { on in
                             // All is exclusive; the other two union, and emptying falls back to All
-                            if option == .all { return state.filters = [.all] }
+                            if option == .all { return state.select([.all]) }
                             var next = state.filters.subtracting([.all])
                             if on { next.insert(option) } else { next.remove(option) }
-                            state.filters = next.isEmpty ? [.all] : next
+                            state.select(next)
                         }))
                 }
                 Divider()

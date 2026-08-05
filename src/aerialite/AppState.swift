@@ -4,7 +4,7 @@ import Combine
 /// The single owner of the catalogue, the settings, and the walls that act on them.
 @MainActor final class AppState: ObservableObject {
     @Published private(set) var catalog = Catalog()
-    @Published var filters: Set<Filter> = [.all] { didSet { pushPlaylist() } }
+    @Published private(set) var filters: Set<Filter> = [.all] { didSet { pushPlaylist() } }
     @Published var running = true { didSet { pushRunning() } }
     @Published var paused = false { didSet { walls.forEach { $0.player.setPaused(paused) } } }
     @Published var speed = 1.0 { didSet { walls.forEach { $0.player.setSpeed(Float(speed)) } } }
@@ -39,6 +39,7 @@ import Combine
         speed = settings.defSpeed
         catalog = Catalog.load()
         Migration.run(into: &catalog)
+        filters = settings.openingView ?? catalog.view   // before build(), so the walls open on it
         catalog.save()
         build()
         observe()
@@ -52,6 +53,17 @@ import Combine
     func reload() {
         settings = Settings.load()
         pushPlaylist()
+    }
+
+    /// The panel's filter menu, and the only thing that records the view. Persisting from the
+    /// property observer instead would also fire for the launch assignment, because a property
+    /// with a default is already initialised by the time init runs, so a `defaultView` in
+    /// config.json would overwrite the view it is supposed to be temporarily standing in for.
+    func select(_ next: Set<Filter>) {
+        filters = next.isEmpty ? [.all] : next
+        guard catalog.view != filters else { return }
+        catalog.view = filters
+        catalog.save()
     }
 
     func toggleFavorite(_ entry: Entry) {
@@ -274,6 +286,7 @@ import Combine
         guard layout != displays || walls.isEmpty else { return }
         displays = layout
         walls = NSScreen.screens.map { Wall(screen: $0, onFullscreen: settings.onFullscreen) }
+        pushed = []            // fresh players hold nothing, so the unchanged-list guard must not skip
         pushPlaylist()
         walls.forEach {
             $0.player.setSpeed(Float(speed)); $0.player.setRepeat(repeatOne); $0.player.setShuffle(shuffle)
