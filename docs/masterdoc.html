@@ -6,10 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AeriaLite masterdoc</title>
   <style>
-    /* The icon is an orbital sunrise, so the page is that view held for the length of the
-       document: black space at the top, the atmosphere banded across the lower third, stars that
-       wash out as the light comes up. Scroll drives --t from 0 to 1 and the sun rises, the bands
-       brighten, the sky warms. No WebGL: two ellipses and a stack of ring shadows. */
+    /* The page is the view the clips are shot from: black space at the top, the atmosphere
+       banded across the lower third, stars that wash out as the light comes up. Scroll drives --t
+       from 0 to 1 and the sun rises, the bands brighten, the sky warms. No WebGL: two ellipses
+       and a stack of ring shadows. */
     :root {
       --t: 0;
       --bg: #06070d;
@@ -35,14 +35,14 @@
     }
 
     /* ---- the view --------------------------------------------------------
-       Sky, stars, atmosphere, sun, then the night side over all of it so the bloom stops dead
-       at the horizon, which is the order the icon paints in. */
+       Sky, stars, atmosphere, sun, then the night side over all of it, so the bloom stops dead
+       at the horizon. */
     .sky {
       position: fixed; inset: 0; z-index: -4; pointer-events: none;
       background: linear-gradient(to bottom,
         #06070d 0%,
         rgba(26, 27, 52, calc(.55 + var(--t) * .45)) 46%,
-        rgba(52, 28, 20, calc(.3 + var(--t) * .7)) 78%);
+        rgba(26, 40, 82, calc(.3 + var(--t) * .7)) 78%);
     }
 
     .stars { position: fixed; inset: 0 0 26vh; z-index: -4; pointer-events: none; opacity: calc(.6 - var(--t) * .42); }
@@ -62,22 +62,23 @@
     }
 
     /* An ellipse pushed almost entirely below the viewport, so only a shallow arc of it shows.
-       Two copies of it: the bands sit under the sun and the night side sits over it, the same
-       order the icon paints in, which is what keeps the widest band off the sun's face. */
+       Two copies of it: the bands sit under the sun and the night side sits over it, which is
+       what keeps the widest band off the sun's face. */
     .halo, .limb {
       position: fixed; left: -50vw; bottom: -155vh; width: 200vw; height: 180vh;
       pointer-events: none; border-radius: 50%;
     }
 
     /* Each spread rings the ellipse and later ones draw behind, so widening them down the list
-       stacks orange, then green, then blue outward from the horizon. */
+       stacks the atmosphere outward from the horizon. One hue, carried by value: a second one
+       turns it into a rainbow decal. */
     .halo {
       z-index: -3;
       box-shadow:
-        0 0 0 5px rgba(240, 142, 62, calc(.5 + var(--t) * .5)),
-        0 0 0 13px rgba(74, 168, 152, calc(.36 + var(--t) * .4)),
-        0 0 0 30px rgba(26, 92, 140, calc(.26 + var(--t) * .32)),
-        0 0 0 62px rgba(16, 32, 78, calc(.16 + var(--t) * .22));
+        0 0 0 5px rgba(196, 226, 255, calc(.5 + var(--t) * .5)),
+        0 0 0 13px rgba(96, 158, 226, calc(.4 + var(--t) * .4)),
+        0 0 0 30px rgba(34, 82, 158, calc(.28 + var(--t) * .34)),
+        0 0 0 62px rgba(16, 34, 84, calc(.16 + var(--t) * .24));
     }
 
     .limb {

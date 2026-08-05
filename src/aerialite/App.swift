@@ -43,24 +43,27 @@ import SwiftUI
         // the panel is built on first open, so SwiftUI stays out of the process for anyone who
         // sets an order once and never opens the menu again
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        status.button?.image = App.horizon()
+        status.button?.image = App.helmet()
         status.button?.target = self
         status.button?.action = #selector(toggle)
     }
 
-    /// The app icon reduced to a glyph: the limb and the sun over it. A template image is one
-    /// flat colour, so the atmosphere band the icon is built around cannot survive here and the
-    /// whole read rests on the two shapes being close enough to pair. The limb's circle is far
-    /// larger than the image, leaving a shallow arc.
-    private static func horizon() -> NSImage {
-        let image = NSImage(size: NSSize(width: 17, height: 15), flipped: false) { _ in
-            NSColor.black.setStroke()
-            let limb = NSBezierPath(ovalIn: NSRect(x: 8.5 - 21.2, y: -16.6 - 21.2, width: 42.4, height: 42.4))
-            limb.lineWidth = 2.0
-            limb.stroke()
-
+    /// The app icon at menu bar size. SF Symbols has no helmet. A template image is one flat
+    /// colour, so the visor is punched out of the shell rather than filled dark, and the shell is
+    /// a dome over a square-cornered body over a collar, the same three subpaths the icon unions.
+    private static func helmet() -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 16), flipped: false) { _ in
+            let shell = NSBezierPath(ovalIn: NSRect(x: 3.1, y: 2.7, width: 11.8, height: 11.8))
+            shell.append(NSBezierPath(rect: NSRect(x: 3.1, y: 4.3, width: 11.8, height: 4.3)))
+            shell.append(NSBezierPath(roundedRect: NSRect(x: 2.0, y: 2.2, width: 14.0, height: 2.6),
+                                      xRadius: 1.0, yRadius: 1.0))
+            shell.windingRule = .nonZero
             NSColor.black.setFill()
-            NSBezierPath(ovalIn: NSRect(x: 5.6, y: 6.7, width: 5.8, height: 5.8)).fill()
+            shell.fill()
+
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            NSBezierPath(roundedRect: NSRect(x: 5.5, y: 6.2, width: 7.0, height: 6.2),
+                         xRadius: 2.0, yRadius: 2.0).fill()
             return true
         }
         image.isTemplate = true

@@ -1,13 +1,12 @@
-// Renders the app icon: an orbital sunrise, the shot most of Apple's aerials open on. What
-// identifies it is the atmosphere seen edge-on, white at the limb through orange and green into
-// blue against black space, so that band carries a fifth of the artwork and everything else is
-// flat. No fine detail: the same image has to read at 16 points in the Finder sidebar.
+// Renders the app icon: an astronaut helmet, white shell and near-black visor, with two stars
+// caught in the top right of the glass. Four shapes and no texture, because the same artwork has
+// to read at 16 points in the Finder sidebar.
 import CoreGraphics
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-let side = 1024.0, inset = 100.0, radius = 185.0
+let side = 1024.0, inset = 100.0, radius = 185.0   // the macOS icon grid: 824 of artwork, corners at 22.4%
 let space = CGColorSpaceCreateDeviceRGB()
 guard let ctx = CGContext(data: nil, width: Int(side), height: Int(side), bitsPerComponent: 8,
                           bytesPerRow: 0, space: space,
@@ -19,70 +18,70 @@ func rgb(_ r: Double, _ g: Double, _ b: Double, _ a: Double = 1) -> CGColor {
 
 let art = CGRect(x: inset, y: inset, width: side - inset * 2, height: side - inset * 2)
 func px(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: art.minX + art.width * x, y: art.minY + art.height * y) }
+func box(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> CGRect {
+    CGRect(x: art.minX + art.width * x, y: art.minY + art.height * y, width: art.width * w, height: art.height * h)
+}
 func disc(_ c: CGPoint, _ r: Double) -> CGRect { CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2) }
 
-// The planet sits mostly below the frame, so only a shallow arc crosses the icon. Centre and
-// radius set the curvature: shrinking the radius bows the horizon harder.
-let planet = px(0.5, -0.85), planetR = art.width * 1.15
-let sun = px(0.5, 0.625), sunR = art.width * 0.088
-let sky = art.width * 0.20                  // atmosphere thickness, measured out from the limb
-
-// Colour against fraction of the way in to the limb, so 1.0 is the horizon itself. Warm stops
-// take the inner third because warm-over-dark is what survives the downscale to 16 points.
-let stops: [(u: Double, r: Double, g: Double, b: Double, a: Double)] = [
-    (0.00,  10,  16,  38, 0.00),
-    (0.30,  16,  32,  78, 0.85),
-    (0.50,  26,  92, 140, 1.00),
-    (0.68,  74, 168, 152, 1.00),
-    (0.82, 214, 186, 104, 1.00),
-    (0.92, 240, 142,  62, 1.00),
-    (1.00, 255, 240, 214, 1.00),
-]
-
-func atmosphere(_ u: Double) -> CGColor {
-    guard let i = stops.firstIndex(where: { u <= $0.u }), i > 0 else { return rgb(10, 16, 38, 0) }
-    let lo = stops[i - 1], hi = stops[i], f = (u - lo.u) / (hi.u - lo.u)
-    return rgb(lo.r + (hi.r - lo.r) * f, lo.g + (hi.g - lo.g) * f,
-               lo.b + (hi.b - lo.b) * f, lo.a + (hi.a - lo.a) * f)
+/// Four-pointed glint. The control points sit on the diagonal at `waist` of the radius, which is
+/// what pinches the arms in; at 1.0 the same path is a square.
+func star(_ c: CGPoint, _ r: Double, waist: Double = 0.30) -> CGPath {
+    let p = CGMutablePath(), w = r * waist
+    p.move(to: CGPoint(x: c.x, y: c.y + r))
+    p.addQuadCurve(to: CGPoint(x: c.x + r, y: c.y), control: CGPoint(x: c.x + w, y: c.y + w))
+    p.addQuadCurve(to: CGPoint(x: c.x, y: c.y - r), control: CGPoint(x: c.x + w, y: c.y - w))
+    p.addQuadCurve(to: CGPoint(x: c.x - r, y: c.y), control: CGPoint(x: c.x - w, y: c.y - w))
+    p.addQuadCurve(to: CGPoint(x: c.x, y: c.y + r), control: CGPoint(x: c.x - w, y: c.y + w))
+    p.closeSubpath()
+    return p
 }
 
 ctx.addPath(CGPath(roundedRect: art, cornerWidth: radius, cornerHeight: radius, transform: nil))
 ctx.clip()
 
 ctx.drawLinearGradient(CGGradient(colorsSpace: space,
-                                  colors: [rgb(3, 4, 11), rgb(7, 9, 20)] as CFArray, locations: [0, 1])!,
-                       start: px(0.5, 1.02), end: px(0.5, 0.30),
+                                  colors: [rgb(34, 42, 78), rgb(14, 18, 40), rgb(8, 10, 22)] as CFArray,
+                                  locations: [0, 0.55, 1])!,
+                       start: px(0.5, 1.02), end: px(0.5, -0.02),
                        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
 
-// Under the bands, which are opaque and cut it off at the top of the atmosphere. Saturated
-// orange rather than cream: a pale colour at this alpha over black composites to warm grey.
-ctx.drawRadialGradient(CGGradient(colorsSpace: space,
-                                  colors: [rgb(255, 168, 58, 0.40), rgb(255, 138, 40, 0.11),
-                                           rgb(255, 128, 40, 0)] as CFArray,
-                                  locations: [0, 0.4, 1])!,
-                       startCenter: sun, startRadius: 0, endCenter: sun, endRadius: art.width * 0.34,
-                       options: [])
+// Dome, body and collar as one path: same winding, so the overlaps fill as a single silhouette.
+// The body's width equals the dome's diameter, putting the join on the circle's widest point, and
+// it takes no corner radius: rounding the top corners nicks the tangent, and the collar covers
+// the bottom pair. Every subpath is addRoundedRect so the winding cannot disagree and punch a
+// hole through the overlaps.
+let shell = CGMutablePath()
+shell.addEllipse(in: disc(px(0.5, 0.585), art.width * 0.345))
+shell.addRoundedRect(in: box(0.155, 0.285, 0.690, 0.300), cornerWidth: 0, cornerHeight: 0)
+shell.addRoundedRect(in: box(0.125, 0.185, 0.750, 0.130), cornerWidth: art.width * 0.050,
+                     cornerHeight: art.width * 0.050)
 
-// Concentric discs outward-in. Every band picks up the limb's curvature for free, and the alpha
-// ramp on the outermost stops blends the top of the atmosphere into space.
-let steps = 140
-for i in 0...steps {
-    let u = Double(i) / Double(steps)
-    ctx.setFillColor(atmosphere(u))
-    ctx.fillEllipse(in: disc(planet, planetR + sky * (1 - u)))
-}
+ctx.saveGState()
+ctx.addPath(shell)
+ctx.clip()
+ctx.drawLinearGradient(CGGradient(colorsSpace: space,
+                                  colors: [rgb(255, 255, 255), rgb(233, 238, 248), rgb(196, 205, 224)] as CFArray,
+                                  locations: [0, 0.5, 1])!,
+                       start: px(0.24, 0.96), end: px(0.78, 0.10),
+                       options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+ctx.restoreGState()
 
-ctx.setFillColor(rgb(5, 7, 14))             // night side, the only near-black mass in the icon
-ctx.fillEllipse(in: disc(planet, planetR))
+let visor = CGPath(roundedRect: box(0.265, 0.415, 0.470, 0.380),
+                   cornerWidth: art.width * 0.120, cornerHeight: art.width * 0.120, transform: nil)
+ctx.saveGState()
+ctx.addPath(visor)
+ctx.clip()
+ctx.drawLinearGradient(CGGradient(colorsSpace: space,
+                                  colors: [rgb(28, 34, 56), rgb(12, 15, 28), rgb(6, 7, 14)] as CFArray,
+                                  locations: [0, 0.45, 1])!,
+                       start: px(0.28, 0.80), end: px(0.72, 0.40),
+                       options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+ctx.restoreGState()
 
-ctx.drawRadialGradient(CGGradient(colorsSpace: space,
-                                  colors: [rgb(255, 240, 200, 0.90), rgb(255, 196, 104, 0.34),
-                                           rgb(255, 170, 70, 0)] as CFArray,
-                                  locations: [0, 0.42, 1])!,
-                       startCenter: sun, startRadius: sunR * 0.75, endCenter: sun, endRadius: sunR * 3.1,
-                       options: [])
-ctx.setFillColor(rgb(255, 253, 246))
-ctx.fillEllipse(in: disc(sun, sunR))
+ctx.setFillColor(rgb(255, 255, 255))
+ctx.addPath(star(px(0.618, 0.690), art.width * 0.056))
+ctx.addPath(star(px(0.680, 0.610), art.width * 0.029))
+ctx.fillPath()
 
 let out = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "icon.png")
 guard let image = ctx.makeImage(),
