@@ -1,7 +1,6 @@
-// Renders the app icon: an astronaut helmet. Two flat colours and no gradient anywhere, so the
-// silhouette and the round visor carry it alone. Built as a ring with an ear pod each side and
-// the collar sitting clear below it: fusing the collar into the circle puts a concave nick
-// wherever a rounded rect's corner meets a narrowing arc, and no radius avoids it.
+// Renders the app icon from scripts/astronaut.png: the helmet silhouette, filled in the shell
+// colour over a flat field. Nothing here draws the helmet, it only recolours and scales the
+// source, so the shape is whatever that file says it is.
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -16,57 +15,78 @@ guard let ctx = CGContext(data: nil, width: Int(side), height: Int(side), bitsPe
 func rgb(_ r: Double, _ g: Double, _ b: Double) -> CGColor {
     CGColor(colorSpace: space, components: [r / 255, g / 255, b / 255, 1])!
 }
-let field = rgb(24, 27, 42), shellInk = rgb(255, 255, 255)
+let field = (r: 24.0, g: 27.0, b: 42.0), shell = (r: 255.0, g: 255.0, b: 255.0)
 
 let art = CGRect(x: inset, y: inset, width: side - inset * 2, height: side - inset * 2)
-func px(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: art.minX + art.width * x, y: art.minY + art.height * y) }
-func box(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> CGRect {
-    CGRect(x: art.minX + art.width * x, y: art.minY + art.height * y, width: art.width * w, height: art.height * h)
-}
-func disc(_ c: CGPoint, _ r: Double) -> CGRect { CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2) }
 
-/// Four-pointed glint. The control points sit on the diagonal at `waist` of the radius, which is
-/// what pinches the arms in; at 1.0 the same path is a square.
-func star(_ c: CGPoint, _ r: Double, waist: Double = 0.30) -> CGPath {
-    let p = CGMutablePath(), w = r * waist
-    p.move(to: CGPoint(x: c.x, y: c.y + r))
-    p.addQuadCurve(to: CGPoint(x: c.x + r, y: c.y), control: CGPoint(x: c.x + w, y: c.y + w))
-    p.addQuadCurve(to: CGPoint(x: c.x, y: c.y - r), control: CGPoint(x: c.x + w, y: c.y - w))
-    p.addQuadCurve(to: CGPoint(x: c.x - r, y: c.y), control: CGPoint(x: c.x - w, y: c.y - w))
-    p.addQuadCurve(to: CGPoint(x: c.x, y: c.y + r), control: CGPoint(x: c.x - w, y: c.y + w))
-    p.closeSubpath()
-    return p
+let args = CommandLine.arguments
+let out = URL(fileURLWithPath: args.count > 1 ? args[1] : "icon.png")
+let source = URL(fileURLWithPath: args.count > 2 ? args[2]
+                                : URL(fileURLWithPath: args[0]).deletingLastPathComponent()
+                                     .appendingPathComponent("astronaut.png").path)
+guard let reader = CGImageSourceCreateWithURL(source as CFURL, nil),
+      let ref = CGImageSourceCreateImageAtIndex(reader, 0, nil)
+else { FileHandle.standardError.write(Data("make-icon: cannot read \(source.path)\n".utf8)); exit(1) }
+
+/// Box blur, three passes, which lands close enough to a Gaussian and keeps this to running sums.
+func blur(_ input: [Double], _ m: Int, _ r: Int) -> [Double] {
+    var a = input, b = [Double](repeating: 0, count: m * m)
+    let width = Double(2 * r + 1)
+    func clamp(_ i: Int) -> Int { min(max(i, 0), m - 1) }
+    for _ in 0..<3 {
+        for y in 0..<m {
+            var sum = (-r...r).reduce(0.0) { $0 + a[y * m + clamp($1)] }
+            for x in 0..<m {
+                b[y * m + x] = sum / width
+                sum += a[y * m + clamp(x + r + 1)] - a[y * m + clamp(x - r)]
+            }
+        }
+        for x in 0..<m {
+            var sum = (-r...r).reduce(0.0) { $0 + b[clamp($1) * m + x] }
+            for y in 0..<m {
+                a[y * m + x] = sum / width
+                sum += b[clamp(y + r + 1) * m + x] - b[clamp(y - r) * m + x]
+            }
+        }
+    }
+    return a
+}
+
+let m = Int(art.width.rounded())
+var scratch = [UInt8](repeating: 0, count: m * m * 4)
+scratch.withUnsafeMutableBytes { buffer in
+    let up = CGContext(data: buffer.baseAddress, width: m, height: m, bitsPerComponent: 8,
+                       bytesPerRow: m * 4, space: space,
+                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    up.interpolationQuality = .high
+    up.draw(ref, in: CGRect(x: 0, y: 0, width: Double(m), height: Double(m)))
+}
+
+// The source is black on transparent, so its alpha is the coverage. A 24px source scaled 34x puts
+// every source pixel on screen as a stair; blurring by about half a source pixel before the
+// threshold is what rounds those off. Much past that and the ear pods melt into the shell.
+let ramp = blur((0..<(m * m)).map { Double(scratch[$0 * 4 + 3]) / 255 }, m, m / 60)
+
+var pixels = [UInt8](repeating: 0, count: m * m * 4)
+for i in 0..<(m * m) {
+    let t = min(max((ramp[i] - 0.46) / 0.08, 0), 1)
+    let a = t * t * (3 - 2 * t)                             // smoothstep, so the edge antialiases
+    pixels[i * 4 + 0] = UInt8((shell.r * a).rounded())      // premultiplied, matching the context
+    pixels[i * 4 + 1] = UInt8((shell.g * a).rounded())
+    pixels[i * 4 + 2] = UInt8((shell.b * a).rounded())
+    pixels[i * 4 + 3] = UInt8((255 * a).rounded())
+}
+let helmet = pixels.withUnsafeMutableBytes { buffer -> CGImage in
+    CGContext(data: buffer.baseAddress, width: m, height: m, bitsPerComponent: 8, bytesPerRow: m * 4,
+              space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
 }
 
 ctx.addPath(CGPath(roundedRect: art, cornerWidth: radius, cornerHeight: radius, transform: nil))
 ctx.clip()
-ctx.setFillColor(field)
+ctx.setFillColor(rgb(field.r, field.g, field.b))
 ctx.fill(art.insetBy(dx: -inset, dy: -inset))
+ctx.draw(helmet, in: art)
 
-let helmet = px(0.5, 0.580)
-
-let shell = CGMutablePath()
-shell.addEllipse(in: disc(helmet, art.width * 0.305))
-for x in [0.143, 0.764] {
-    shell.addRoundedRect(in: box(x, 0.465, 0.093, 0.160), cornerWidth: art.width * 0.040,
-                         cornerHeight: art.width * 0.040)
-}
-shell.addRoundedRect(in: box(0.325, 0.130, 0.350, 0.108), cornerWidth: art.width * 0.052,
-                     cornerHeight: art.width * 0.052)
-
-ctx.setFillColor(shellInk)
-ctx.addPath(shell)
-ctx.fillPath()
-
-ctx.setFillColor(field)
-ctx.fillEllipse(in: disc(helmet, art.width * 0.228))
-
-ctx.setFillColor(shellInk)
-ctx.addPath(star(px(0.610, 0.672), art.width * 0.047))
-ctx.addPath(star(px(0.672, 0.618), art.width * 0.025))
-ctx.fillPath()
-
-let out = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "icon.png")
 guard let image = ctx.makeImage(),
       let sink = CGImageDestinationCreateWithURL(out as CFURL, UTType.png.identifier as CFString, 1, nil)
 else { exit(1) }

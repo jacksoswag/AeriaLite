@@ -17,7 +17,7 @@ install -m 755 "${SWIFTPM_BUILD_DIR:-$ROOT/.build}/release/aerialite" "$CONTENTS
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 swiftc -O -gnone -o "$work/make-icon" "$ROOT/scripts/make-icon.swift"
-"$work/make-icon" "$work/icon.png"
+"$work/make-icon" "$work/icon.png" "$ROOT/scripts/astronaut.png"
 
 set -- 16 16 32 32 128 128 256 256 512 512
 mkdir -p "$work/AppIcon.iconset"
@@ -27,6 +27,8 @@ for spec in 16:icon_16x16 32:icon_16x16@2x 32:icon_32x32 64:icon_32x32@2x \
   sips -z "${spec%%:*}" "${spec%%:*}" "$work/icon.png" --out "$work/AppIcon.iconset/${spec##*:}.png" >/dev/null
 done
 iconutil -c icns "$work/AppIcon.iconset" -o "$CONTENTS/Resources/AppIcon.icns"
+# the same silhouette drives the menu bar, loaded as a template so AppKit tints it
+install -m 644 "$ROOT/scripts/astronaut.png" "$CONTENTS/Resources/MenuIcon.png"
 
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

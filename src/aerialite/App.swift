@@ -43,35 +43,21 @@ import SwiftUI
         // the panel is built on first open, so SwiftUI stays out of the process for anyone who
         // sets an order once and never opens the menu again
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        status.button?.image = App.helmet()
+        status.button?.image = App.helmet
         status.button?.target = self
         status.button?.action = #selector(toggle)
     }
 
-    /// The app icon at menu bar size, same construction: ring, an ear pod each side, collar clear
-    /// below. SF Symbols has no helmet. A template image is one flat colour, so the visor is
-    /// punched out rather than filled dark, and the glints are dropped since there is no second
-    /// tone to draw them in.
-    private static func helmet() -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 16), flipped: false) { _ in
-            let shell = NSBezierPath(ovalIn: NSRect(x: 3.8, y: 4.4, width: 10.4, height: 10.4))
-            for x in [3.0, 13.4] {
-                shell.append(NSBezierPath(roundedRect: NSRect(x: x, y: 7.8, width: 1.6, height: 3.6),
-                                          xRadius: 0.7, yRadius: 0.7))
-            }
-            shell.append(NSBezierPath(roundedRect: NSRect(x: 6.2, y: 1.6, width: 5.6, height: 1.8),
-                                      xRadius: 0.85, yRadius: 0.85))
-            shell.windingRule = .nonZero
-            NSColor.black.setFill()
-            shell.fill()
-
-            NSGraphicsContext.current?.compositingOperation = .destinationOut
-            NSBezierPath(ovalIn: NSRect(x: 5.3, y: 5.9, width: 7.4, height: 7.4)).fill()
-            return true
-        }
+    /// The same silhouette the app icon is built from, bundled by scripts/bundle.sh. Marked as a
+    /// template so AppKit tints it to whatever the menu bar is doing, which is the only way this
+    /// tracks light and dark.
+    private static let helmet: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "MenuIcon", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return nil }
         image.isTemplate = true
+        image.size = NSSize(width: 17, height: 17)
         return image
-    }
+    }()
 
     @objc private func toggle() {
         guard let button = status.button else { return }
