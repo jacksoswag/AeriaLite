@@ -1,6 +1,7 @@
-// Renders the app icon: a planet's lit limb with the sun standing just above it, which is the
-// shot most of Apple's aerials open on. Bold solid shapes and no fine detail, because the same
-// artwork has to read at 16 points in the Finder sidebar.
+// Renders the app icon: an orbital sunrise, the shot most of Apple's aerials open on. What
+// identifies it is the atmosphere seen edge-on, white at the limb through orange and green into
+// blue against black space, so that band carries a fifth of the artwork and everything else is
+// flat. No fine detail: the same image has to read at 16 points in the Finder sidebar.
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -20,47 +21,67 @@ let art = CGRect(x: inset, y: inset, width: side - inset * 2, height: side - ins
 func px(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: art.minX + art.width * x, y: art.minY + art.height * y) }
 func disc(_ c: CGPoint, _ r: Double) -> CGRect { CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2) }
 
-// The planet sits mostly below the frame, so only a shallow arc of it crosses the icon. Its
-// centre and radius are what set the curvature: shrinking the radius bows the horizon harder.
-let planet = px(0.5, -0.77), planetR = art.width * 1.15
-let sun = px(0.5, 0.615), sunR = art.width * 0.115
-let band = art.width * 0.10          // 1.3px of lit limb once the whole thing is 16 points
+// The planet sits mostly below the frame, so only a shallow arc crosses the icon. Centre and
+// radius set the curvature: shrinking the radius bows the horizon harder.
+let planet = px(0.5, -0.85), planetR = art.width * 1.15
+let sun = px(0.5, 0.625), sunR = art.width * 0.088
+let sky = art.width * 0.20                  // atmosphere thickness, measured out from the limb
+
+// Colour against fraction of the way in to the limb, so 1.0 is the horizon itself. Warm stops
+// take the inner third because warm-over-dark is what survives the downscale to 16 points.
+let stops: [(u: Double, r: Double, g: Double, b: Double, a: Double)] = [
+    (0.00,  10,  16,  38, 0.00),
+    (0.30,  16,  32,  78, 0.85),
+    (0.50,  26,  92, 140, 1.00),
+    (0.68,  74, 168, 152, 1.00),
+    (0.82, 214, 186, 104, 1.00),
+    (0.92, 240, 142,  62, 1.00),
+    (1.00, 255, 240, 214, 1.00),
+]
+
+func atmosphere(_ u: Double) -> CGColor {
+    guard let i = stops.firstIndex(where: { u <= $0.u }), i > 0 else { return rgb(10, 16, 38, 0) }
+    let lo = stops[i - 1], hi = stops[i], f = (u - lo.u) / (hi.u - lo.u)
+    return rgb(lo.r + (hi.r - lo.r) * f, lo.g + (hi.g - lo.g) * f,
+               lo.b + (hi.b - lo.b) * f, lo.a + (hi.a - lo.a) * f)
+}
 
 ctx.addPath(CGPath(roundedRect: art, cornerWidth: radius, cornerHeight: radius, transform: nil))
 ctx.clip()
 
-// night at the top warming into the atmosphere at the bottom. Kept well clear of black: the
-// planet below is the only near-black in the icon, and at 16 points that gap is what reads.
 ctx.drawLinearGradient(CGGradient(colorsSpace: space,
-                                  colors: [rgb(30, 36, 66), rgb(48, 41, 76), rgb(126, 68, 42)] as CFArray,
-                                  locations: [0, 0.52, 1])!,
-                       start: px(0.5, 1.02), end: px(0.5, -0.02),
+                                  colors: [rgb(3, 4, 11), rgb(7, 9, 20)] as CFArray, locations: [0, 1])!,
+                       start: px(0.5, 1.02), end: px(0.5, 0.30),
                        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
 
+// Under the bands, which are opaque and cut it off at the top of the atmosphere. Saturated
+// orange rather than cream: a pale colour at this alpha over black composites to warm grey.
 ctx.drawRadialGradient(CGGradient(colorsSpace: space,
-                                  colors: [rgb(255, 205, 132, 0.55), rgb(255, 186, 108, 0.13),
-                                           rgb(255, 176, 96, 0)] as CFArray,
-                                  locations: [0, 0.45, 1])!,
-                       startCenter: sun, startRadius: 0, endCenter: sun, endRadius: art.width * 0.62,
+                                  colors: [rgb(255, 168, 58, 0.40), rgb(255, 138, 40, 0.11),
+                                           rgb(255, 128, 40, 0)] as CFArray,
+                                  locations: [0, 0.4, 1])!,
+                       startCenter: sun, startRadius: 0, endCenter: sun, endRadius: art.width * 0.34,
                        options: [])
 
-ctx.setFillColor(rgb(9, 11, 20))     // over the glow, so the bloom stops dead at the horizon
+// Concentric discs outward-in. Every band picks up the limb's curvature for free, and the alpha
+// ramp on the outermost stops blends the top of the atmosphere into space.
+let steps = 140
+for i in 0...steps {
+    let u = Double(i) / Double(steps)
+    ctx.setFillColor(atmosphere(u))
+    ctx.fillEllipse(in: disc(planet, planetR + sky * (1 - u)))
+}
+
+ctx.setFillColor(rgb(5, 7, 14))             // night side, the only near-black mass in the icon
 ctx.fillEllipse(in: disc(planet, planetR))
 
-// the lit limb, brightest under the sun and cooling as it runs off both edges
-ctx.saveGState()
-ctx.addEllipse(in: disc(planet, planetR))
-ctx.setLineWidth(band)
-ctx.replacePathWithStrokedPath()
-ctx.clip()
-ctx.drawLinearGradient(CGGradient(colorsSpace: space,
-                                  colors: [rgb(226, 150, 86), rgb(255, 246, 226), rgb(226, 150, 86)] as CFArray,
-                                  locations: [0, 0.5, 1])!,
-                       start: px(-0.05, 0), end: px(1.05, 0),
-                       options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-ctx.restoreGState()
-
-ctx.setFillColor(rgb(255, 247, 231))
+ctx.drawRadialGradient(CGGradient(colorsSpace: space,
+                                  colors: [rgb(255, 240, 200, 0.90), rgb(255, 196, 104, 0.34),
+                                           rgb(255, 170, 70, 0)] as CFArray,
+                                  locations: [0, 0.42, 1])!,
+                       startCenter: sun, startRadius: sunR * 0.75, endCenter: sun, endRadius: sunR * 3.1,
+                       options: [])
+ctx.setFillColor(rgb(255, 253, 246))
 ctx.fillEllipse(in: disc(sun, sunR))
 
 let out = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "icon.png")

@@ -48,18 +48,19 @@ import SwiftUI
         status.button?.action = #selector(toggle)
     }
 
-    /// The app icon reduced to a glyph: the lit limb and the sun above it. The limb's circle is
-    /// far larger than the image so only a shallow arc crosses it, and the icon's atmosphere glow
-    /// is dropped because a template image cannot fade and would render it as a solid block.
+    /// The app icon reduced to a glyph: the limb and the sun over it. A template image is one
+    /// flat colour, so the atmosphere band the icon is built around cannot survive here and the
+    /// whole read rests on the two shapes being close enough to pair. The limb's circle is far
+    /// larger than the image, leaving a shallow arc.
     private static func horizon() -> NSImage {
         let image = NSImage(size: NSSize(width: 17, height: 15), flipped: false) { _ in
             NSColor.black.setStroke()
-            let limb = NSBezierPath(ovalIn: NSRect(x: 8.5 - 21.2, y: -16 - 21.2, width: 42.4, height: 42.4))
-            limb.lineWidth = 1.7
+            let limb = NSBezierPath(ovalIn: NSRect(x: 8.5 - 21.2, y: -16.6 - 21.2, width: 42.4, height: 42.4))
+            limb.lineWidth = 2.0
             limb.stroke()
 
             NSColor.black.setFill()
-            NSBezierPath(ovalIn: NSRect(x: 6.1, y: 8.2, width: 4.8, height: 4.8)).fill()
+            NSBezierPath(ovalIn: NSRect(x: 5.6, y: 6.7, width: 5.8, height: 5.8)).fill()
             return true
         }
         image.isTemplate = true

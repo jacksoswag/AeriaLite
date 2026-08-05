@@ -6,11 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AeriaLite masterdoc</title>
   <style>
-    /* The icon is a planet's lit limb with the sun above it, so the page is that view held for
-       the length of the document: night at the top, the horizon fixed across the lower third,
-       stars that wash out as the light comes up. Scroll drives --t from 0 to 1 and the sun
-       rises, the limb brightens, the sky warms. No WebGL: a sunrise is three gradients and an
-       ellipse with one border. */
+    /* The icon is an orbital sunrise, so the page is that view held for the length of the
+       document: black space at the top, the atmosphere banded across the lower third, stars that
+       wash out as the light comes up. Scroll drives --t from 0 to 1 and the sun rises, the bands
+       brighten, the sky warms. No WebGL: two ellipses and a stack of ring shadows. */
     :root {
       --t: 0;
       --bg: #06070d;
@@ -36,17 +35,17 @@
     }
 
     /* ---- the view --------------------------------------------------------
-       Sky, then stars, then the sun's bloom, then the planet over the top of all three so the
-       bloom stops dead at the horizon, exactly as the icon builds it. */
+       Sky, stars, atmosphere, sun, then the night side over all of it so the bloom stops dead
+       at the horizon, which is the order the icon paints in. */
     .sky {
-      position: fixed; inset: 0; z-index: -3; pointer-events: none;
+      position: fixed; inset: 0; z-index: -4; pointer-events: none;
       background: linear-gradient(to bottom,
         #06070d 0%,
         rgba(26, 27, 52, calc(.55 + var(--t) * .45)) 46%,
-        rgba(122, 66, 40, calc(.22 + var(--t) * .78)) 78%);
+        rgba(52, 28, 20, calc(.3 + var(--t) * .7)) 78%);
     }
 
-    .stars { position: fixed; inset: 0 0 26vh; z-index: -3; pointer-events: none; opacity: calc(.6 - var(--t) * .42); }
+    .stars { position: fixed; inset: 0 0 26vh; z-index: -4; pointer-events: none; opacity: calc(.6 - var(--t) * .42); }
     .stars i { position: absolute; border-radius: 50%; background: #fff5e6; }
 
     /* The sun climbs 30vh as you read, from just clear of the limb to a third of the way up the
@@ -63,12 +62,28 @@
     }
 
     /* An ellipse pushed almost entirely below the viewport, so only a shallow arc of it shows.
-       border-top on a 50% radius draws the lit limb and tapers it off at both ends for free. */
-    .limb {
+       Two copies of it: the bands sit under the sun and the night side sits over it, the same
+       order the icon paints in, which is what keeps the widest band off the sun's face. */
+    .halo, .limb {
       position: fixed; left: -50vw; bottom: -155vh; width: 200vw; height: 180vh;
-      z-index: -1; pointer-events: none; border-radius: 50%;
+      pointer-events: none; border-radius: 50%;
+    }
+
+    /* Each spread rings the ellipse and later ones draw behind, so widening them down the list
+       stacks orange, then green, then blue outward from the horizon. */
+    .halo {
+      z-index: -3;
+      box-shadow:
+        0 0 0 5px rgba(240, 142, 62, calc(.5 + var(--t) * .5)),
+        0 0 0 13px rgba(74, 168, 152, calc(.36 + var(--t) * .4)),
+        0 0 0 30px rgba(26, 92, 140, calc(.26 + var(--t) * .32)),
+        0 0 0 62px rgba(16, 32, 78, calc(.16 + var(--t) * .22));
+    }
+
+    .limb {
+      z-index: -1;
       background: #05060b;
-      border-top: 3px solid rgba(255, 226, 178, calc(.45 + var(--t) * .55));
+      border-top: 2px solid rgba(255, 240, 214, calc(.5 + var(--t) * .5));
     }
 
     #progress { position: fixed; top: 0; left: 0; height: 1.5px; width: 0; z-index: 60; background: var(--accent); opacity: .8; }
@@ -143,6 +158,7 @@
 
   <div class="sky"></div>
   <div class="stars" id="stars"></div>
+  <div class="halo"></div>
   <div class="sun"></div>
   <div class="limb"></div>
   <div id="progress"></div>
