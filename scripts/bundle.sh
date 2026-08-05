@@ -1,10 +1,10 @@
 #!/bin/bash
-# Builds kino.app: a menu bar agent with no dock icon. The same binary still serves the CLI,
-# so `kino prep` works from inside the bundle too.
+# Builds aerialite.app: a menu bar agent with no dock icon. The same binary still serves the CLI,
+# so `aerialite prep` works from inside the bundle too.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="${APP:-$ROOT/output/kino.app}"
+APP="${APP:-$ROOT/output/aerialite.app}"
 CONTENTS="$APP/Contents"
 VERSION="1.0"
 
@@ -13,7 +13,7 @@ swift build --package-path "$ROOT" -c release -Xswiftc -gnone
 
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
-install -m 755 "$ROOT/.build/release/kino" "$CONTENTS/MacOS/kino"
+install -m 755 "${SWIFTPM_BUILD_DIR:-$ROOT/.build}/release/aerialite" "$CONTENTS/MacOS/aerialite"
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 swiftc -O -gnone -o "$work/make-icon" "$ROOT/scripts/make-icon.swift"
@@ -33,10 +33,10 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Kino</string>
-  <key>CFBundleDisplayName</key><string>Kino</string>
-  <key>CFBundleIdentifier</key><string>com.jacksonadams.kino</string>
-  <key>CFBundleExecutable</key><string>kino</string>
+  <key>CFBundleName</key><string>AeriaLite</string>
+  <key>CFBundleDisplayName</key><string>AeriaLite</string>
+  <key>CFBundleIdentifier</key><string>com.jacksonadams.aerialite</string>
+  <key>CFBundleExecutable</key><string>aerialite</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

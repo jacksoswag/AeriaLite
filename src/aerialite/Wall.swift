@@ -16,7 +16,7 @@ final class Wall {
     private var enabled = false
     private var generation = 0
     private static let settleDelay = 0.75
-    private static let probe = DispatchQueue(label: "kino.coverage", qos: .utility)
+    private static let probe = DispatchQueue(label: "aerialite.coverage", qos: .utility)
 
     private let policy: Settings.Fullscreen
 

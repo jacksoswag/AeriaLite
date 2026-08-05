@@ -1,6 +1,8 @@
-# Kino technical spec
+# AeriaLite technical spec
 
-A macOS video wallpaper renderer and its companion transcoder, built to hold no decoded frame and to stop decoding in a fullscreen space. Public AppKit, AVFoundation, SwiftUI and CoreGraphics, plus three private CoreGraphics Services calls for Space membership. No external dependencies at runtime.
+A macOS video wallpaper renderer and its companion transcoder, built to hold no decoded frame, to stop decoding in a fullscreen space, and to keep a bounded amount of video on disk. Public AppKit, AVFoundation, SwiftUI and CoreGraphics, plus three private CoreGraphics Services calls for Space membership. No external dependencies at runtime.
+
+It covers the same catalogue as `AerialScreensaver/Aerial` and takes the opposite shape: a wallpaper with its own window and player rather than a screensaver hosted in Apple's App Extension, no overlay surface, and every cost measured in `tests/reports/`.
 
 ## Binary shape
 
@@ -8,9 +10,9 @@ One executable, three commands.
 
 | Command | Does |
 | --- | --- |
-| `kino play` (also the no-argument default) | runs the renderer as a foreground-less agent until killed |
-| `kino prep <input> [flags]` | transcodes a source clip to a profile and exits |
-| `kino catalog` | imports Apple's macOS aerial manifest into `wallpapers.json` |
+| `aerialite play` (also the no-argument default) | runs the renderer as a foreground-less agent until killed |
+| `aerialite prep <input> [flags]` | transcodes a source clip to a profile and exits |
+| `aerialite catalog` | imports Apple's macOS aerial manifest into `wallpapers.json` |
 
 `main.swift` dispatches on `argv[1]` and calls `setvbuf(stdout, nil, _IOLBF, 0)` first, because launchd redirects stdout to a file where block buffering hides every line until the process dies.
 
@@ -19,7 +21,7 @@ One executable, three commands.
 | File | Holds |
 | --- | --- |
 | `main.swift` | argument dispatch |
-| `App.swift` | `NSApplicationDelegate`, status item, popover, projector icon |
+| `App.swift` | `NSApplicationDelegate`, status item, popover, menu bar glyph |
 | `AppState.swift` | owns catalogue, settings and walls; fetch, prefetch, conform queue |
 | `Wall.swift` | one screen's window, player and visibility gate |
 | `Player.swift` | passthrough playlist playback |
@@ -33,7 +35,7 @@ One executable, three commands.
 | `Library.swift` | path resolution, fetch, conform, cache eviction |
 | `Migration.swift` | disk reconciliation at launch; `CatalogImport` |
 | `Prep.swift` | the transcoder |
-| `Paths.swift` | every disk location |
+| `Paths.swift` | every disk location; the one-shot move off the old root |
 | `ControlPanel.swift` | the SwiftUI panel |
 
 ## Playback
@@ -52,7 +54,7 @@ Seeks snap to the keyframe grid. A passthrough reader cannot begin mid-GOP, and 
 
 ## The gate
 
-`Coverage.isVisible` reads `kCGWindowIsOnscreen` for Kino's own window. Two earlier approaches failed and should not be retried: `NSWindow.occlusionState` reports raw 8192 with `.visible` never set below normal window level and emits no change notification; and scanning for a layer-0 window whose bounds contain `CGDisplayBounds` never matches, because a real fullscreen window measures (0, 33, 1470, 923) against display bounds of (0, 0, 1470, 956).
+`Coverage.isVisible` reads `kCGWindowIsOnscreen` for AeriaLite's own window. Two earlier approaches failed and should not be retried: `NSWindow.occlusionState` reports raw 8192 with `.visible` never set below normal window level and emits no change notification; and scanning for a layer-0 window whose bounds contain `CGDisplayBounds` never matches, because a real fullscreen window measures (0, 33, 1470, 923) against display bounds of (0, 0, 1470, 956).
 
 The query is a synchronous IPC into WindowServer, which is also the process compositing the video, so it runs off the main thread and hops back with the boolean.
 
@@ -70,7 +72,7 @@ Registration happens at window creation and again after every `orderFront`, neve
 
 ## Apple's wallpaper agent
 
-`AppState.init` takes `com.apple.wallpaper.agent` out of the login domain before the cache pass, since a live agent rewrites what was just deleted. Its window sits under Kino's, so a configured aerial holds a second decoder open behind a picture nobody can see.
+`AppState.init` takes `com.apple.wallpaper.agent` out of the login domain before the cache pass, since a live agent rewrites what was just deleted. Its window sits under AeriaLite's, so a configured aerial holds a second decoder open behind a picture nobody can see.
 
 Killing the processes does nothing on its own: launchd has the agent back inside two seconds. `launchctl bootout gui/<uid>/com.apple.wallpaper.agent` is what makes it stay dead for the session. The ExtensionKit extensions are separate processes that outlive the agent, so a `pkill -u <uid> -f` on `WallpaperAgent|WallpaperAerialsExtension` follows it, catching both those and the plugin processes running out of `WallpaperAgent.app`. `wallpaperexportd` is root-owned and left alone, and `idleassetsd` downloads assets rather than drawing them, so neither is touched.
 
@@ -103,7 +105,7 @@ Both keyframe caps are set, `AVVideoMaxKeyFrameIntervalKey` and `AVVideoMaxKeyFr
 
 Trimming happens at the reader's `timeRange` rather than after, so nothing past `maxSeconds` is ever encoded. A `maxSeconds` of 0 keeps the whole clip.
 
-`Library.conform` shells out to `kino prep` rather than calling it in-process, because a failure in the encoder cannot then take the agent with it. The subprocess runs at `.background` quality of service. Conforms are strictly serialised through one queue: three concurrent hardware encodes contend for the same media engine and the contention is visible in playback.
+`Library.conform` shells out to `aerialite prep` rather than calling it in-process, because a failure in the encoder cannot then take the agent with it. The subprocess runs at `.background` quality of service. Conforms are strictly serialised through one queue: three concurrent hardware encodes contend for the same media engine and the contention is visible in playback.
 
 ### Measured cost
 
@@ -127,7 +129,7 @@ A fetch lands Apple's master, writes it into the catalogue and pushes it into th
 
 `Player.onClipChange` fires the moment a reader opens a new clip, which drives prefetch and eviction off the transition itself rather than a poll. The reader runs ahead of the picture, so the callback carries the opened id: reading `status.id` there would still report the previous clip.
 
-`trimCache` evicts least-recently-used files from the streamed half only, never `persistent/`, and never the file passed as `keep`. That argument is a stem, not a filename. It also clears Apple's own wallpaper caches, since nothing there serves anything while Kino owns the desktop.
+`trimCache` evicts least-recently-used files from the streamed half only, never `persistent/`, and never the file passed as `keep`. That argument is a stem, not a filename. It also clears Apple's own wallpaper caches, since nothing there serves anything while AeriaLite owns the desktop.
 
 Downloads and streams are stored by slug, but files predating the slug carry the display name verbatim; both spellings resolve to the same clip so a download replaces rather than duplicates.
 
@@ -139,7 +141,7 @@ Sides are forced even, because 4:2:0 chroma requires it.
 
 ## Storage
 
-Everything lives under `~/Library/Application Support/Kino/`.
+Everything lives under `~/Library/Application Support/AeriaLite/`.
 
 | Path | Holds |
 | --- | --- |
@@ -148,11 +150,15 @@ Everything lives under `~/Library/Application Support/Kino/`.
 | `Wallpapers/` | the streamed cache, cleared on quit |
 | `Wallpapers/persistent/` | downloads, never evicted |
 
+The whole root is bounded. Downloads land conformed at 1080p under a 2.5 Mbps cap and trimmed at 180 seconds, which measures 47 MB a clip against Apple's 145 MB masters, and the streamed half is evicted least-recently-used against `maxCache`. A 15-clip library measured 711 MB; the same 15 masters would be 2.2 GB and the full 152-clip catalogue about 22 GB.
+
+`Paths.ensure` moves `Application Support/Kino` to the current root when the old one exists and the new one does not, and `Migration.repoint` rewrites the absolute paths the catalogue stored under it. Both are one-shot and both can go once no install predates the rename.
+
 A malformed `config.json` falls back to defaults rather than being rewritten over the top of someone's work. `Entry.source.path` is the whole availability test: nothing is inferred from a folder, so a hand-pointed file anywhere works exactly like a downloaded one, and renaming an entry cannot break playback because the filename never moves.
 
 ## Catalogue
 
-`kino catalog` reads Apple's macOS aerial manifest, which carries 152 assets with exactly one URL key each, `url-4K-SDR-240FPS`. It lives on a content-addressed `itunes-assets` path that is not guessable from the tvOS URL shape; `resources-17` through `resources-20` do not exist. The tvOS manifests under `sylvan.apple.com/Aerials/` are a separate catalogue at 29.97fps with five URL keys, and no 1080p 240fps variant exists in any of them.
+`aerialite catalog` reads Apple's macOS aerial manifest, which carries 152 assets with exactly one URL key each, `url-4K-SDR-240FPS`. It lives on a content-addressed `itunes-assets` path that is not guessable from the tvOS URL shape; `resources-17` through `resources-20` do not exist. The tvOS manifests under `sylvan.apple.com/Aerials/` are a separate catalogue at 29.97fps with five URL keys, and no 1080p 240fps variant exists in any of them.
 
 Apple ships several clips per place, so bare labels collide; the import numbers them in shot order.
 

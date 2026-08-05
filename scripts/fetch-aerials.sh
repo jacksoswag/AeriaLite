@@ -7,7 +7,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="${BIN:-$ROOT/.build/release/kino}"
+BIN="${BIN:-${SWIFTPM_BUILD_DIR:-$ROOT/.build}/release/aerialite}"
 DEST="${DEST:-$HOME/Library/Wallpapers}"
 STAGE="$DEST/.staging"
 MANIFEST="https://sylvan.apple.com/Aerials/resources-16.tar"

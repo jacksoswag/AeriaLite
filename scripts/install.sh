@@ -1,27 +1,33 @@
 #!/bin/bash
-# Installs kino.app into ~/Applications, puts the same binary on PATH for `kino prep`,
+# Installs aerialite.app into ~/Applications, puts the same binary on PATH for `aerialite prep`,
 # and registers a login agent so the wallpaper is up before you are.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPS="${APPS:-$HOME/Applications}"
 BIN_DIR="${BIN_DIR:-$HOME/Utils/local/bin}"
-CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/kino"
-LABEL="com.jacksonadams.kino"
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aerialite"
+LABEL="com.jacksonadams.aerialite"
+OLD="com.jacksonadams.kino"          # the install this project shipped under before the rename
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-APP="$APPS/kino.app"
+APP="$APPS/aerialite.app"
 
-APP="$ROOT/output/kino.app" "$ROOT/scripts/bundle.sh" > /dev/null
+APP="$ROOT/output/aerialite.app" "$ROOT/scripts/bundle.sh" > /dev/null
 mkdir -p "$APPS" "$BIN_DIR" "$CONF_DIR"
 
-launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+for label in "$OLD" "$LABEL"; do launchctl bootout "gui/$UID/$label" 2>/dev/null || true; done
 pkill -f "kino.app/Contents/MacOS/kino" 2>/dev/null || true
+pkill -f "aerialite.app/Contents/MacOS/aerialite" 2>/dev/null || true
 # quitting restores Apple's wallpaper agent before the process goes, and bootstrapping against a
-# job still tearing down answers EIO
-for _ in $(seq 20); do launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1 || break; sleep 0.5; done
-rm -rf "$APP"
-cp -R "$ROOT/output/kino.app" "$APP"
-ln -sf "$APP/Contents/MacOS/kino" "$BIN_DIR/kino"
+# job still tearing down answers EIO. Both labels, since the old agent restoring the wallpaper
+# after the new one culled it leaves macOS drawing a second picture underneath.
+for _ in $(seq 20); do
+  launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1 || launchctl print "gui/$UID/$OLD" >/dev/null 2>&1 || break
+  sleep 0.5
+done
+rm -rf "$APP" "$APPS/kino.app" "$HOME/Library/LaunchAgents/$OLD.plist" "$BIN_DIR/kino"
+cp -R "$ROOT/output/aerialite.app" "$APP"
+ln -sf "$APP/Contents/MacOS/aerialite" "$BIN_DIR/aerialite"
 
 cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -29,16 +35,16 @@ cat > "$PLIST" <<PLIST_EOF
 <plist version="1.0">
 <dict>
   <key>Label</key><string>$LABEL</string>
-  <key>ProgramArguments</key><array><string>$APP/Contents/MacOS/kino</string></array>
+  <key>ProgramArguments</key><array><string>$APP/Contents/MacOS/aerialite</string></array>
   <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>$CONF_DIR/kino.log</string>
-  <key>StandardErrorPath</key><string>$CONF_DIR/kino.log</string>
+  <key>StandardOutPath</key><string>$CONF_DIR/aerialite.log</string>
+  <key>StandardErrorPath</key><string>$CONF_DIR/aerialite.log</string>
 </dict>
 </plist>
 PLIST_EOF
 
 launchctl bootstrap "gui/$UID" "$PLIST"
-count=$(find "$HOME/Library/Application Support/Kino/Wallpapers" -name '*.mp4' 2>/dev/null | wc -l | tr -d ' ')
-echo "$APP installed and running, $count wallpapers, log at $CONF_DIR/kino.log"
-[ "$count" = "0" ] && echo "nothing to play yet: scripts/fetch-aerials.sh, or kino prep <file>"
+count=$(find "$HOME/Library/Application Support/AeriaLite/Wallpapers" -name '*.mp4' 2>/dev/null | wc -l | tr -d ' ')
+echo "$APP installed and running, $count wallpapers, log at $CONF_DIR/aerialite.log"
+[ "$count" = "0" ] && echo "nothing to play yet: scripts/fetch-aerials.sh, or aerialite prep <file>"
 exit 0

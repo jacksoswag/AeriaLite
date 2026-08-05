@@ -1,8 +1,12 @@
 import Foundation
 
-/// Everything Kino owns on disk. One root, so a full uninstall is one directory.
+/// Everything AeriaLite owns on disk. One root, so a full uninstall is one directory.
 enum Paths {
     static let root = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Application Support/AeriaLite")
+
+    /// Where the same root sat under the old name. `Migration.repoint` fixes the rows afterwards.
+    static let legacyRoot = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent("Library/Application Support/Kino")
 
     static var config: URL { root.appendingPathComponent("config.json") }
@@ -15,8 +19,13 @@ enum Paths {
     static var persistent: URL { cache.appendingPathComponent("persistent") }
 
     static func ensure() {
+        let fm = FileManager.default
+        // ahead of the directory creation below, which would otherwise occupy the destination
+        if fm.fileExists(atPath: legacyRoot.path) && !fm.fileExists(atPath: root.path) {
+            try? fm.moveItem(at: legacyRoot, to: root)
+        }
         for dir in [root, cache, persistent] {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
     }
 

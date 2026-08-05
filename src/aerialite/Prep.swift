@@ -8,7 +8,7 @@ import VideoToolbox
 enum Prep {
     static func main(_ args: [String]) {
         guard let first = args.first, !first.hasPrefix("-") else {
-            fail("usage: kino prep <input> [-o <output>] [--keep 0-1] [--size WxH] [--bitrate BPS]")
+            fail("usage: aerialite prep <input> [-o <output>] [--keep 0-1] [--size WxH] [--bitrate BPS]")
         }
         let cfg = Settings.load().downloads
         let input = URL(fileURLWithPath: (first as NSString).expandingTildeInPath)
@@ -116,7 +116,7 @@ enum Prep {
 
         var due = CMTime.zero, kept: Int64 = 0, seen = 0, origin: CMTime?
         let drained = DispatchSemaphore(value: 0)
-        encoded.requestMediaDataWhenReady(on: DispatchQueue(label: "kino.prep", qos: .utility)) {
+        encoded.requestMediaDataWhenReady(on: DispatchQueue(label: "aerialite.prep", qos: .utility)) {
             while encoded.isReadyForMoreMediaData {
                 guard let sample = decoded.copyNextSampleBuffer() else {
                     encoded.markAsFinished(); drained.signal(); return

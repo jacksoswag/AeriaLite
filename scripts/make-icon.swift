@@ -1,5 +1,6 @@
-// Renders the app icon: an old-school two-reel film projector. Drawn as bold solid shapes with
-// no fine detail, because the same artwork has to read at 16 points in the Finder sidebar.
+// Renders the app icon: a planet's lit limb with the sun standing just above it, which is the
+// shot most of Apple's aerials open on. Bold solid shapes and no fine detail, because the same
+// artwork has to read at 16 points in the Finder sidebar.
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -17,57 +18,50 @@ func rgb(_ r: Double, _ g: Double, _ b: Double, _ a: Double = 1) -> CGColor {
 
 let art = CGRect(x: inset, y: inset, width: side - inset * 2, height: side - inset * 2)
 func px(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: art.minX + art.width * x, y: art.minY + art.height * y) }
-func box(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> CGRect {
-    CGRect(x: art.minX + art.width * x, y: art.minY + art.height * y, width: art.width * w, height: art.height * h)
-}
+func disc(_ c: CGPoint, _ r: Double) -> CGRect { CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2) }
+
+// The planet sits mostly below the frame, so only a shallow arc of it crosses the icon. Its
+// centre and radius are what set the curvature: shrinking the radius bows the horizon harder.
+let planet = px(0.5, -0.77), planetR = art.width * 1.15
+let sun = px(0.5, 0.615), sunR = art.width * 0.115
+let band = art.width * 0.10          // 1.3px of lit limb once the whole thing is 16 points
 
 ctx.addPath(CGPath(roundedRect: art, cornerWidth: radius, cornerHeight: radius, transform: nil))
 ctx.clip()
 
+// night at the top warming into the atmosphere at the bottom. Kept well clear of black: the
+// planet below is the only near-black in the icon, and at 16 points that gap is what reads.
 ctx.drawLinearGradient(CGGradient(colorsSpace: space,
-                                  colors: [rgb(38, 42, 54), rgb(26, 28, 38), rgb(58, 44, 38)] as CFArray,
-                                  locations: [0, 0.55, 1])!,
-                       start: CGPoint(x: art.minX, y: art.maxY), end: CGPoint(x: art.maxX, y: art.minY),
+                                  colors: [rgb(30, 36, 66), rgb(48, 41, 76), rgb(126, 68, 42)] as CFArray,
+                                  locations: [0, 0.52, 1])!,
+                       start: px(0.5, 1.02), end: px(0.5, -0.02),
                        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
 
-let cream = rgb(240, 233, 219)
-ctx.setFillColor(cream)
+ctx.drawRadialGradient(CGGradient(colorsSpace: space,
+                                  colors: [rgb(255, 205, 132, 0.55), rgb(255, 186, 108, 0.13),
+                                           rgb(255, 176, 96, 0)] as CFArray,
+                                  locations: [0, 0.45, 1])!,
+                       startCenter: sun, startRadius: 0, endCenter: sun, endRadius: art.width * 0.62,
+                       options: [])
 
-// The light cone, thrown from the lens and widening to the edge. Drawn before the projector
-// so the body sits over its narrow end and the cone reads as leaving the lens.
+ctx.setFillColor(rgb(9, 11, 20))     // over the glow, so the bloom stops dead at the horizon
+ctx.fillEllipse(in: disc(planet, planetR))
+
+// the lit limb, brightest under the sun and cooling as it runs off both edges
 ctx.saveGState()
-let cone = CGMutablePath()
-cone.move(to: px(0.655, 0.318))
-cone.addLine(to: px(1.04, 0.055))
-cone.addLine(to: px(1.04, 0.655))
-cone.addLine(to: px(0.655, 0.392))
-cone.closeSubpath()
-ctx.addPath(cone)
+ctx.addEllipse(in: disc(planet, planetR))
+ctx.setLineWidth(band)
+ctx.replacePathWithStrokedPath()
 ctx.clip()
 ctx.drawLinearGradient(CGGradient(colorsSpace: space,
-                                  colors: [rgb(255, 240, 206, 0.80), rgb(255, 228, 168, 0.26),
-                                           rgb(255, 222, 155, 0)] as CFArray,
-                                  locations: [0, 0.42, 0.94])!,
-                       start: px(0.655, 0.355), end: px(1.04, 0.355), options: [])
+                                  colors: [rgb(226, 150, 86), rgb(255, 246, 226), rgb(226, 150, 86)] as CFArray,
+                                  locations: [0, 0.5, 1])!,
+                       start: px(-0.05, 0), end: px(1.05, 0),
+                       options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
 ctx.restoreGState()
 
-// Feed and take-up reels. Deliberately unequal and set at different heights: two matched
-// circles with wide hubs read as a pair of eyes rather than as spools.
-for (cx, cy, rf) in [(0.245, 0.670, 0.138), (0.505, 0.588, 0.100)] {
-    let c = px(cx, cy), r = art.width * rf
-    ctx.setFillColor(cream)
-    ctx.fillEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
-    ctx.setBlendMode(.clear)
-    ctx.fillEllipse(in: CGRect(x: c.x - r * 0.17, y: c.y - r * 0.17, width: r * 0.34, height: r * 0.34))
-    ctx.setBlendMode(.normal)
-}
-
-// one rounded slab for the housing and a short barrel, nothing else
-ctx.setFillColor(cream)
-ctx.addPath(CGPath(roundedRect: box(0.105, 0.262, 0.520, 0.186), cornerWidth: 38, cornerHeight: 38, transform: nil))
-ctx.fillPath()
-ctx.addPath(CGPath(roundedRect: box(0.600, 0.306, 0.090, 0.098), cornerWidth: 22, cornerHeight: 22, transform: nil))
-ctx.fillPath()
+ctx.setFillColor(rgb(255, 247, 231))
+ctx.fillEllipse(in: disc(sun, sunR))
 
 let out = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "icon.png")
 guard let image = ctx.makeImage(),

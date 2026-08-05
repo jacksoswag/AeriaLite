@@ -23,7 +23,7 @@ import SwiftUI
 
     /// Quitting hands the desktop back to macOS, agent included. The streamed cache is throwaway
     /// by definition and downloads are not, so only the former goes; anything macOS cached for
-    /// Kino goes with it.
+    /// AeriaLite goes with it.
     func applicationWillTerminate(_ note: Notification) {
         Library.clearCache()
         Library.clearAppleWallpaperCaches()
@@ -43,31 +43,23 @@ import SwiftUI
         // the panel is built on first open, so SwiftUI stays out of the process for anyone who
         // sets an order once and never opens the menu again
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        status.button?.image = App.projector()
+        status.button?.image = App.horizon()
         status.button?.target = self
         status.button?.action = #selector(toggle)
     }
 
-    /// The app icon's projector reduced to a menu bar glyph: housing, barrel, two reels, and
-    /// nothing else. SF Symbols has no projector. The reels are stroked rather than punched
-    /// because a hub that small closes up below 16 points, and the icon's light cone is left
-    /// out because a template image cannot fade, so a cone here would be a solid horn.
-    private static func projector() -> NSImage {
+    /// The app icon reduced to a glyph: the lit limb and the sun above it. The limb's circle is
+    /// far larger than the image so only a shallow arc crosses it, and the icon's atmosphere glow
+    /// is dropped because a template image cannot fade and would render it as a solid block.
+    private static func horizon() -> NSImage {
         let image = NSImage(size: NSSize(width: 17, height: 15), flipped: false) { _ in
-            let solid = NSBezierPath()
-            solid.append(NSBezierPath(roundedRect: NSRect(x: 0.5, y: 1.8, width: 11.0, height: 4.4),
-                                      xRadius: 1.4, yRadius: 1.4))
-            solid.append(NSBezierPath(roundedRect: NSRect(x: 11.2, y: 2.9, width: 2.4, height: 2.2),
-                                      xRadius: 0.9, yRadius: 0.9))
-            NSColor.black.setFill()
-            solid.fill()
-
             NSColor.black.setStroke()
-            for (cx, cy, r) in [(3.9, 9.6, 2.8), (9.6, 8.7, 2.0)] {
-                let reel = NSBezierPath(ovalIn: NSRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
-                reel.lineWidth = 1.5
-                reel.stroke()
-            }
+            let limb = NSBezierPath(ovalIn: NSRect(x: 8.5 - 21.2, y: -16 - 21.2, width: 42.4, height: 42.4))
+            limb.lineWidth = 1.7
+            limb.stroke()
+
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: NSRect(x: 6.1, y: 8.2, width: 4.8, height: 4.8)).fill()
             return true
         }
         image.isTemplate = true

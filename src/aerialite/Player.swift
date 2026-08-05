@@ -24,7 +24,7 @@ final class Player {
     private let sync = AVSampleBufferRenderSynchronizer()
     // userInitiated, not utility: this queue feeds the display layer, and at a background QoS it
     // gets descheduled under load, which shows up as late samples and micro-stutter
-    private let feed = DispatchQueue(label: "kino.feed", qos: .userInitiated)
+    private let feed = DispatchQueue(label: "aerialite.feed", qos: .userInitiated)
     private let label: String
 
     private var queue: [URL] = []
@@ -351,7 +351,7 @@ final class Player {
     }
 
     // alive-but-not-playing is indistinguishable from working without these lines
-    private func log(_ state: String) { print("kino: \(label) \(state)") }
+    private func log(_ state: String) { print("aerialite: \(label) \(state)") }
 }
 
 extension Player {

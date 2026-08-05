@@ -1,6 +1,6 @@
 import Foundation
 
-/// macOS keeps drawing its own wallpaper under Kino's window, where a configured aerial holds a
+/// macOS keeps drawing its own wallpaper under AeriaLite's window, where a configured aerial holds a
 /// second decoder open out of sight. A plain kill buys under two seconds against launchd, so the
 /// job leaves the login session instead and comes back on quit.
 enum AppleWallpaper {

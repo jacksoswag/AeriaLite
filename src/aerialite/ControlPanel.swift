@@ -162,7 +162,7 @@ struct ControlPanel: View {
 
     private var header: some View {
         HStack(spacing: 2) {
-            Text("Kino").font(.system(size: 13, weight: .semibold))
+            Text("AeriaLite").font(.system(size: 13, weight: .semibold))
             Spacer()
             Menu {
                 ForEach(Filter.allCases) { option in

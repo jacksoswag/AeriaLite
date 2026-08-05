@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "kino",
+    name: "aerialite",
     platforms: [.macOS(.v14)],
-    targets: [.executableTarget(name: "kino", path: "src/kino")]
+    targets: [.executableTarget(name: "aerialite", path: "src/aerialite")]
 )

@@ -4,7 +4,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT/.build/release/kino"
+BIN="${SWIFTPM_BUILD_DIR:-$ROOT/.build}/release/aerialite"
 WORK="$ROOT/output/misc/test"
 REPORTS="$ROOT/tests/reports"
 DATE="$(date +%Y-%m-%d)"
@@ -29,7 +29,7 @@ probe() { ffprobe -v error -select_streams v:0 -show_entries "$1" -of default=nk
 agent() { launchctl print "gui/$UID/com.apple.wallpaper.agent" >/dev/null 2>&1 && echo up || echo gone; }
 
 smoke() {
-  local out="$WORK/source.kino.mp4"
+  local out="$WORK/source.aerialite.mp4"
   echo "== smoke =="
   # -o is mandatory: prep defaults into persistent/, which the suite must never touch
   "$BIN" prep "$WORK/source.mov" -o "$out" --size 1280x720 --keep 0.5 --bitrate 3000000 > "$WORK/prep.log" || {
@@ -45,13 +45,13 @@ smoke() {
 }
 
 perf() {
-  local kino="$HOME/Library/Application Support/Kino"
+  local aerialite="$HOME/Library/Application Support/AeriaLite"
 
   echo "== perf =="
   # play takes the installed config and library, with nothing to override either, so the run
   # records the settings its numbers were taken under
-  echo "  live config, $(find "$kino/Wallpapers" -name '*.mp4' 2>/dev/null | wc -l | tr -d ' ') clips in the library:"
-  sed 's/^/  /' "$kino/config.json" 2>/dev/null || echo "  absent, so defaults"
+  echo "  live config, $(find "$aerialite/Wallpapers" -name '*.mp4' 2>/dev/null | wc -l | tr -d ' ') clips in the library:"
+  sed 's/^/  /' "$aerialite/config.json" 2>/dev/null || echo "  absent, so defaults"
   "$BIN" play > "$WORK/play.log" 2>&1 &
   local pid=$!
   sleep 5
@@ -74,7 +74,7 @@ perf() {
 setup "${1:-}"
 REPORT="$REPORTS/${DATE}_$( [ "${1:-}" = "--perf" ] && echo perf || echo smk ).md"
 {
-  echo "# kino ${1:-} $DATE"
+  echo "# aerialite ${1:-} $DATE"
   echo
   echo '```'
   case "${1:-}" in

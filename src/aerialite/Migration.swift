@@ -5,13 +5,25 @@ import Foundation
 /// than inferring one from the entry's name.
 enum Migration {
     static func run(into catalog: inout Catalog) {
+        repoint(&catalog)
         adoptLegacyFolder(&catalog)
         adopt(Paths.persistent, into: &catalog)
         adopt(Paths.cache, into: &catalog)
         forgetMissing(&catalog)
     }
 
-    /// The pre-Kino location. Files move rather than copy, so this runs exactly once.
+    /// Rows still addressing the Kino-era root, whose files `Paths.ensure` has already moved.
+    /// `adopt` would re-find them by name, but only for a title that survives the slug round trip.
+    private static func repoint(_ catalog: inout Catalog) {
+        let old = Paths.legacyRoot.path + "/"
+        for entry in catalog.entries where entry.source.path.hasPrefix(old) {
+            var row = entry
+            row.source.path = Paths.root.path + "/" + entry.source.path.dropFirst(old.count)
+            catalog.replace(row)
+        }
+    }
+
+    /// The pre-AeriaLite location. Files move rather than copy, so this runs exactly once.
     private static func adoptLegacyFolder(_ catalog: inout Catalog) {
         let old = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Wallpapers")
         guard let files = try? FileManager.default.contentsOfDirectory(at: old, includingPropertiesForKeys: nil)
@@ -25,14 +37,14 @@ enum Migration {
         }
     }
 
-    /// Files sitting in Kino's own folders that no row points at yet.
+    /// Files sitting in AeriaLite's own folders that no row points at yet.
     private static func adopt(_ folder: URL, into catalog: inout Catalog) {
         guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
         else { return }
         let known = Set(catalog.entries.map(\.source.path))
         for file in files where file.pathExtension.lowercased() == "mp4"
             && !known.contains(file.path)
-            && !file.lastPathComponent.contains(".kino.") {
+            && !file.lastPathComponent.contains(".aerialite.") {
             claim(title: Library.title(for: file.deletingPathExtension().lastPathComponent),
                   path: file, into: &catalog)
         }
@@ -61,7 +73,7 @@ enum Migration {
     }
 }
 
-/// `kino catalog` writes Apple's whole aerial set into wallpapers.json as absent rows: names and
+/// `aerialite catalog` writes Apple's whole aerial set into wallpapers.json as absent rows: names and
 /// links only, nothing downloaded. Kept off the launch path so starting up never waits on a network.
 enum CatalogImport {
     /// The macOS catalogue rather than the tvOS one. Its clips are 4K SDR at 239.76, against
@@ -76,7 +88,7 @@ enum CatalogImport {
         guard let tar = try? Data(contentsOf: URL(string: manifest)!)
         else { fail("could not reach Apple's manifest") }
 
-        let work = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("kino-manifest")
+        let work = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("aerialite-manifest")
         try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         let archive = work.appendingPathComponent("r.tar")
         try? tar.write(to: archive)

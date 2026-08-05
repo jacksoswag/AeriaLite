@@ -4,22 +4,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kino masterdoc</title>
+  <title>AeriaLite masterdoc</title>
   <style>
-    /* Kino is German for cinema and the icon is a film projector, so the page is the room:
-       black, one warm beam from the upper left, dust in the light. Scroll drives --t from 0
-       to 1 and the lamp warms, the cone widens, the motes drift. No WebGL: a projector beam
-       is two gradients and a mask, and a shader here would be showing off rather than
-       showing something. */
+    /* The icon is a planet's lit limb with the sun above it, so the page is that view held for
+       the length of the document: night at the top, the horizon fixed across the lower third,
+       stars that wash out as the light comes up. Scroll drives --t from 0 to 1 and the sun
+       rises, the limb brightens, the sky warms. No WebGL: a sunrise is three gradients and an
+       ellipse with one border. */
     :root {
       --t: 0;
-      --bg: #07060a;
+      --bg: #06070d;
       --accent: color-mix(in oklab, #b98b4e, #ffd9a0 calc(var(--t) * 100%));
       --ink: #efe9e2;
       --muted: #a89e94;
       --faint: #6d6459;
       --line: rgba(215, 175, 120, .13);
-      --glass: rgba(12, 10, 14, .68);
+      --glass: rgba(10, 11, 18, .72);
       --serif: 'Charter', 'Bitstream Charter', 'Iowan Old Style', Palatino, Georgia, serif;
       --sans: 'Inter', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
       --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -35,31 +35,40 @@
       font: 17px/1.7 var(--serif); overflow-x: hidden; -webkit-font-smoothing: antialiased;
     }
 
-    /* ---- the beam -------------------------------------------------------
-       One cone from the upper left, brightening with --t. The second gradient is
-       the lamp itself; the third is spill on the far wall. */
-    .beam {
-      position: fixed; inset: 0; z-index: -1; pointer-events: none;
-      background:
-        conic-gradient(from 118deg at 6% 4%,
-          transparent 0deg,
-          rgba(255, 208, 145, calc(.015 + var(--t) * .05)) 7deg,
-          rgba(255, 216, 160, calc(.05 + var(--t) * .10)) 13deg,
-          rgba(255, 208, 145, calc(.015 + var(--t) * .05)) 21deg,
-          transparent 28deg),
-        radial-gradient(30vw 30vw at 6% 4%, rgba(255, 198, 128, calc(.10 + var(--t) * .26)), transparent 62%),
-        radial-gradient(90vw 70vh at 88% 92%, rgba(120, 78, 30, calc(.05 + var(--t) * .09)), transparent 70%);
+    /* ---- the view --------------------------------------------------------
+       Sky, then stars, then the sun's bloom, then the planet over the top of all three so the
+       bloom stops dead at the horizon, exactly as the icon builds it. */
+    .sky {
+      position: fixed; inset: 0; z-index: -3; pointer-events: none;
+      background: linear-gradient(to bottom,
+        #06070d 0%,
+        rgba(26, 27, 52, calc(.55 + var(--t) * .45)) 46%,
+        rgba(122, 66, 40, calc(.22 + var(--t) * .78)) 78%);
     }
 
-    /* Dust in the light. Three layers at different rates is the whole parallax. */
-    .motes { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: calc(.22 + var(--t) * .4); }
-    .motes i {
-      position: absolute; border-radius: 50%; background: rgba(255, 224, 180, .5);
-      animation: drift linear infinite;
+    .stars { position: fixed; inset: 0 0 26vh; z-index: -3; pointer-events: none; opacity: calc(.6 - var(--t) * .42); }
+    .stars i { position: absolute; border-radius: 50%; background: #fff5e6; }
+
+    /* The sun climbs 30vh as you read, from just clear of the limb to a third of the way up the
+       sky, and its lower bloom stays cut off by the planet throughout. Same radial as the icon. */
+    .sun {
+      position: fixed; left: 50%; z-index: -2; pointer-events: none;
+      bottom: calc(11vh + var(--t) * 30vh);
+      width: 46vmin; height: 46vmin; margin-left: -23vmin;
+      background: radial-gradient(circle,
+        #fff7e7 0 9%,
+        rgba(255, 205, 132, calc(.42 + var(--t) * .3)) 11%,
+        rgba(255, 186, 108, .12) 46%,
+        transparent 72%);
     }
-    @keyframes drift {
-      from { transform: translate3d(0, 8vh, 0); }
-      to   { transform: translate3d(4vw, -92vh, 0); }
+
+    /* An ellipse pushed almost entirely below the viewport, so only a shallow arc of it shows.
+       border-top on a 50% radius draws the lit limb and tapers it off at both ends for free. */
+    .limb {
+      position: fixed; left: -50vw; bottom: -155vh; width: 200vw; height: 180vh;
+      z-index: -1; pointer-events: none; border-radius: 50%;
+      background: #05060b;
+      border-top: 3px solid rgba(255, 226, 178, calc(.45 + var(--t) * .55));
     }
 
     #progress { position: fixed; top: 0; left: 0; height: 1.5px; width: 0; z-index: 60; background: var(--accent); opacity: .8; }
@@ -126,20 +135,20 @@
 
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
-      .motes i { animation: none; }
-      .motes { opacity: .18; }
     }
   </style>
 </head>
 
 <body>
 
-  <div class="beam"></div>
-  <div class="motes" id="motes"></div>
+  <div class="sky"></div>
+  <div class="stars" id="stars"></div>
+  <div class="sun"></div>
+  <div class="limb"></div>
   <div id="progress"></div>
 
   <div class="topbar">
-    <span class="brand">Kino</span>
+    <span class="brand">AeriaLite</span>
     <span class="sub">masterdoc</span>
     <span class="spacer"></span>
     <button id="navtoc" aria-expanded="false">Contents</button>
@@ -155,6 +164,7 @@
     <a href="#shape">The three commands</a>
     <a href="#passthrough">Never holding a frame</a>
     <a href="#numbers">What that costs</a>
+    <a href="#disk">What it keeps</a>
     <a href="#spaces">Living on every desktop</a>
     <a href="#gate">Knowing when nobody looks</a>
     <a href="#swap">Play now, improve later</a>
@@ -165,7 +175,8 @@
 
     <div class="hero">
       <h1>A wallpaper that never<br>holds a picture.</h1>
-      <p>4K video on the desktop for <span class="num">18 MB</span> and about one percent of a core.</p>
+      <p>4K video on the desktop for <span class="num">18 MB</span>, and <span class="num">47 MB</span> a clip on disk
+        against Apple's 145.</p>
     </div>
 
     <div class="part-head" id="part1"><span class="pn">I</span>
@@ -174,40 +185,42 @@
 
     <section class="block" id="what">
       <h3>What it is</h3>
-      <p class="plain">Kino plays video as your desktop wallpaper. It draws Apple's aerial footage, the drone shots of
-        coastlines and cities you see on an Apple TV, underneath your icons and windows. What makes it worth writing
-        about is not that it does this, but how little of your machine it uses while doing it.</p>
+      <p class="plain">AeriaLite plays Apple's aerial footage as your desktop wallpaper: the drone shots of coastlines
+        and cities you see on an Apple TV, underneath your icons and windows. The same catalogue Aerial has shown for
+        years, in a lighter shape. What makes it worth writing about is not that it does this, but how little of your
+        machine and your disk it uses while doing it.</p>
       <details class="layer analogy" open>
         <summary>Analogy</summary>
-        <p>Most video players are a chef who unpacks the whole delivery onto the counter before cooking. Kino passes
-          each sealed box straight to the kitchen next door and never opens one. The boxes are small; the unpacked
-          ingredients are enormous; and the kitchen next door was going to unpack them anyway.</p>
+        <p>Aerial is a cinema that opens when you leave the room. This is a window that was always going to be there,
+          with something moving on the other side of it.</p>
       </details>
       <details class="layer technical">
         <summary>Technical</summary>
         <p>One borderless <code>NSWindow</code> per screen, one level above the desktop icon layer, hosting an
           <code>AVSampleBufferDisplayLayer</code> driven by an <code>AVSampleBufferRenderSynchronizer</code>. It
           replaces the <code>idleassetsd</code> and <code>WallpaperVideoExtension</code> path entirely, which keeps a
-          managed asset store and a resident decoder with no exposed control over either.</p>
+          managed asset store and a resident decoder with no exposed control over either. Aerial 4.x takes the other
+          route: an App Extension hosted by macOS, with the wallpaper set through PaperSaver rather than drawn
+          directly, plus overlays, weather, live cameras and four runtime dependencies that this has none of.</p>
       </details>
     </section>
 
     <section class="block" id="shape">
       <h3>The three commands</h3>
       <p class="plain">One program does three jobs: it runs as the wallpaper, it converts video files into a form
-        that plays cheaply, and it fetches Apple's list of available clips.</p>
+        that plays cheaply and stores small, and it fetches Apple's list of available clips.</p>
       <details class="layer analogy" open>
         <summary>Analogy</summary>
-        <p>A projectionist, a film lab, and a catalogue in one person. The projectionist runs continuously; the lab and
-          the catalogue are called on when there is new material.</p>
+        <p>A ground crew for one aircraft. Somebody keeps it flying, somebody refits it between flights, somebody
+          keeps the list of destinations. Only the first of the three works continuously.</p>
       </details>
       <details class="layer technical">
         <summary>Technical</summary>
-        <p><code>kino play</code> is the agent and the no-argument default. <code>kino prep</code> is the transcoder,
-          shelled out to as a subprocess so an encoder failure cannot take the agent with it. <code>kino catalog</code>
-          imports Apple's macOS aerial manifest. <code>main.swift</code> dispatches on <code>argv[1]</code> and sets
-          line buffering first, because launchd redirects stdout to a file where block buffering hides every line until
-          the process dies.</p>
+        <p><code>aerialite play</code> is the agent and the no-argument default. <code>aerialite prep</code> is the
+          transcoder, shelled out to as a subprocess so an encoder failure cannot take the agent with it.
+          <code>aerialite catalog</code> imports Apple's macOS aerial manifest. <code>main.swift</code> dispatches on
+          <code>argv[1]</code> and sets line buffering first, because launchd redirects stdout to a file where block
+          buffering hides every line until the process dies.</p>
       </details>
     </section>
 
@@ -218,14 +231,15 @@
     <section class="block" id="passthrough">
       <h3>Never holding a frame</h3>
       <p class="plain">A single frame of 4K video, once decoded, is about 24 megabytes. A video player normally holds
-        several at once. Kino holds none. It reads the compressed data, which is a few tens of kilobytes per frame, and
-        hands it to the part of macOS that was going to decode it anyway. The finished pictures live in memory that
-        belongs to the system, not to Kino.</p>
+        several at once. AeriaLite holds none. It reads the compressed data, which is a few tens of kilobytes per
+        frame, and hands it to the part of macOS that was going to decode it anyway. The finished pictures live in
+        memory that belongs to the system.</p>
       <details class="layer analogy" open>
         <summary>Analogy</summary>
         <p>Think of the difference between carrying a folded map and carrying the landscape. The compressed frame is
-          the folded map: small, and useless until something unfolds it. Kino never unfolds it. It hands the folded map
-          through a window to someone whose job is unfolding, and that person keeps the landscape on their own desk.</p>
+          the folded map: small, and useless until something unfolds it. AeriaLite never unfolds it. It hands the
+          folded map through a window to someone whose job is unfolding, and that person keeps the landscape on their
+          own desk.</p>
       </details>
       <details class="layer technical">
         <summary>Technical</summary>
@@ -261,7 +275,39 @@
           18 MB is close to framework baseline for an AppKit and AVFoundation process. The figure is
           <code>phys_footprint</code>, not RSS: RSS reads around 52 MB here and the difference is shared and
           file-backed pages counted against every process that touches them. Any memory claim quoting RSS for this kind
-          of work is quoting the wrong number.</p>
+          of work is quoting the wrong number, which is also why the comparison table refuses to guess at Aerial's:
+          nobody has run <code>footprint</code> against it.</p>
+      </details>
+    </section>
+
+    <section class="block" id="disk">
+      <h3>What it keeps</h3>
+      <p class="plain">Apple ships 152 clips and each master is about 145 megabytes, so holding the catalogue as
+        delivered costs roughly 22 gigabytes. AeriaLite converts each clip as it arrives and puts a ceiling on
+        everything else. A real library of 15 clips measures 711 megabytes.</p>
+      <table>
+        <tr><th>What</th><th>Size</th></tr>
+        <tr><td>Apple's master, 137s</td><td class="n">145 MB</td></tr>
+        <tr><td>The same clip, converted</td><td class="n">47 MB</td></tr>
+        <tr><td>Whole catalogue, as delivered</td><td class="n">~22 GB</td></tr>
+        <tr><td>Streamed cache, default cap</td><td class="n">3 GB</td></tr>
+      </table>
+      <details class="layer analogy" open>
+        <summary>Analogy</summary>
+        <p>Shopping for the week rather than the year. The cupboard has a size, what does not fit does not come home,
+          and the oldest thing in it goes first.</p>
+      </details>
+      <details class="layer technical">
+        <summary>Technical</summary>
+        <p>Downloads conform to 1080p under a 2.5 Mbps average cap and trim at 180 seconds. Storage is bitrate times
+          duration and almost nothing else: halving the framerate shrinks a file 8%, not 50%, because the bitrate
+          target binds first, and with a cap set the resolution stops affecting size at all. Streamed copies are
+          evicted least-recently-used against a byte and count cap; <code>persistent/</code> is never evicted and never
+          counted against it.</p>
+        <p>Trimming saves disk and zero bytes on the wire. The whole master downloads before any trim happens, so a
+          60-second cap against a 137-second master still pulls all 145 MB and then discards 56% of it. Worse, short
+          clips need replacing sooner, which takes sustained streaming cost from 8.5 Mbps to about 19. Trim for disk,
+          and only on files being kept.</p>
       </details>
     </section>
 
@@ -297,8 +343,8 @@
 
     <section class="block" id="gate">
       <h3>Knowing when nobody looks</h3>
-      <p class="plain">There is no point decoding video that a fullscreen app is covering. Kino asks the window server
-        whether its own window is visible, and stops when it is not. Finding a question the system would answer
+      <p class="plain">There is no point decoding video that a fullscreen app is covering. AeriaLite asks the window
+        server whether its own window is visible, and stops when it is not. Finding a question the system would answer
         honestly took three attempts.</p>
       <details class="layer analogy" open>
         <summary>Analogy</summary>
@@ -307,9 +353,9 @@
       </details>
       <details class="layer technical">
         <summary>Technical</summary>
-        <p><code>Coverage.isVisible</code> reads <code>kCGWindowIsOnscreen</code> for Kino's own window. Two earlier
-          approaches failed: <code>NSWindow.occlusionState</code> reports raw 8192 with <code>.visible</code> never set
-          below normal window level and emits no notification; and testing whether a layer-0 window contains
+        <p><code>Coverage.isVisible</code> reads <code>kCGWindowIsOnscreen</code> for AeriaLite's own window. Two
+          earlier approaches failed: <code>NSWindow.occlusionState</code> reports raw 8192 with <code>.visible</code>
+          never set below normal window level and emits no notification; and testing whether a layer-0 window contains
           <code>CGDisplayBounds</code> never matches, because a real fullscreen window measures (0, 33, 1470, 923)
           against display bounds of (0, 0, 1470, 956).</p>
         <p>The query is a synchronous IPC into WindowServer, which is also the process compositing the video, so it
@@ -325,8 +371,8 @@
     <section class="block" id="swap">
       <h3>Play now, improve later</h3>
       <p class="plain">Apple's clips arrive as very large files. Converting one into something cheap to play takes
-        minutes. Rather than making you wait, Kino plays the large file immediately and swaps in the converted version
-        later, at a moment when the picture was going to change anyway.</p>
+        minutes. Rather than making you wait, AeriaLite plays the large file immediately and swaps in the converted
+        version later, at a moment when the picture was going to change anyway.</p>
       <details class="layer analogy" open>
         <summary>Analogy</summary>
         <p>A restaurant serving bread while the meal cooks. Swapping plates mid-mouthful would be worse than the wait,
@@ -414,18 +460,16 @@
       if (e.key >= '1' && e.key <= '3' && !e.metaKey && !e.ctrlKey) setLevel(+e.key);
     });
 
-    // dust: seeded by index so the field is stable across reloads rather than random
-    const motes = document.getElementById('motes');
-    for (let i = 0; i < 44; i++) {
-      const m = document.createElement('i');
-      const s = 1 + (i % 5) * 0.7;
-      m.style.width = m.style.height = s.toFixed(1) + 'px';
-      m.style.left = ((i * 37) % 100) + '%';
-      m.style.top = ((i * 61) % 100) + '%';
-      m.style.animationDuration = (26 + (i % 7) * 9) + 's';
-      m.style.animationDelay = '-' + (i * 1.7).toFixed(1) + 's';
-      m.style.opacity = (0.25 + (i % 4) * 0.18).toFixed(2);
-      motes.appendChild(m);
+    // stars: seeded by index so the field is stable across reloads rather than random
+    const stars = document.getElementById('stars');
+    for (let i = 0; i < 90; i++) {
+      const s = document.createElement('i');
+      const size = 1 + (i % 4) * 0.45;
+      s.style.width = s.style.height = size.toFixed(2) + 'px';
+      s.style.left = ((i * 37) % 100) + '%';
+      s.style.top = ((i * 53) % 100) + '%';
+      s.style.opacity = (0.22 + (i % 5) * 0.16).toFixed(2);
+      stars.appendChild(s);
     }
 
     setLevel(2);

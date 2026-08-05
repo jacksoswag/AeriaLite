@@ -54,7 +54,7 @@ enum Library {
         return String(kept).split(separator: "-").joined(separator: "-")
     }
 
-    /// Only ever removes files Kino put in its own folders; a hand-pointed path is left alone.
+    /// Only ever removes files AeriaLite put in its own folders; a hand-pointed path is left alone.
     static func delete(_ entry: Entry) {
         guard let url = playable(entry), url.path.hasPrefix(Paths.cache.path) else { return }
         try? FileManager.default.removeItem(at: url)
@@ -68,7 +68,7 @@ enum Library {
         // outside the scanned folders on purpose: an in-flight temp file dropped into cache/
         // gets adopted by Migration as a library entry of its own
         let scratch = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("kino-conform-\(UUID().uuidString)")
+            .appendingPathComponent("aerialite-conform-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let out = scratch.appendingPathComponent(file.lastPathComponent)
         let task = Process()
@@ -109,7 +109,7 @@ enum Library {
 
     /// Everywhere macOS caches wallpaper state: Apple's aerial store with its manifest,
     /// thumbnails and videos, plus the frame caches a still-image wallpaper leaves behind.
-    /// None of it serves anything while Kino owns the desktop, and a frame cached for one clip
+    /// None of it serves anything while AeriaLite owns the desktop, and a frame cached for one clip
     /// must not outlive it. Runs at launch, on every clip change, and on quit.
     ///
     /// com.apple.wallpaper/Store is deliberately spared: it is the picker's index rather than a
@@ -133,7 +133,7 @@ enum Library {
     /// Two caps, count and bytes. capAtHigh keeps whichever allows more; otherwise the tighter
     /// of the two binds, which is the safer default.
     static func trimCache(_ cache: Settings.Cache, keeping keep: String?) {
-        clearAppleWallpaperCaches()      // Kino owns the desktop; nothing of Apple's should survive a cache pass
+        clearAppleWallpaperCaches()      // AeriaLite owns the desktop; nothing of Apple's should survive a cache pass
         let fm = FileManager.default
         guard let found = try? fm.contentsOfDirectory(at: Paths.cache,
                                                       includingPropertiesForKeys: [.contentAccessDateKey])
