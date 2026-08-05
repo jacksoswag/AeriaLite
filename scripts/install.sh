@@ -30,8 +30,6 @@ cat > "$PLIST" <<PLIST_EOF
 <dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array><string>$APP/Contents/MacOS/kino</string></array>
-  <key>EnvironmentVariables</key>
-  <dict><key>XDG_CONFIG_HOME</key><string>${XDG_CONFIG_HOME:-$HOME/.config}</string></dict>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>$CONF_DIR/kino.log</string>
   <key>StandardErrorPath</key><string>$CONF_DIR/kino.log</string>

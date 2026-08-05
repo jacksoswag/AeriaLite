@@ -1,6 +1,6 @@
 #!/bin/bash
 # --smk  encodes a generated clip and checks the output profile
-# --perf plays it and samples the renderer's cost
+# --perf plays the installed library and samples the renderer's cost
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,9 +16,10 @@ check() { # check <label> <actual> <expected>
 }
 
 setup() {
-  command -v ffmpeg >/dev/null || { echo "ffmpeg required for the fixture"; exit 2; }
   [ -x "$BIN" ] || { echo "build first: swift build -c release -Xswiftc -gnone"; exit 2; }
   mkdir -p "$WORK" "$REPORTS"
+  [ "${1:-}" = "--smk" ] || return 0        # only smoke encodes, and only it needs the master
+  command -v ffmpeg >/dev/null || { echo "ffmpeg required for the fixture"; exit 2; }
   [ -f "$WORK/source.mov" ] || ffmpeg -y -hide_banner -loglevel error \
     -f lavfi -i "testsrc2=size=3840x2160:rate=60:duration=8" \
     -c:v hevc_videotoolbox -b:v 40M -tag:v hvc1 "$WORK/source.mov"
@@ -44,14 +45,14 @@ smoke() {
 }
 
 perf() {
-  # its own file at native size, or it silently inherits whatever smoke downscaled to
-  local out="$WORK/native.kino.mp4"
-  [ -f "$out" ] || "$BIN" prep "$WORK/source.mov" -o "$out"
-  mkdir -p "$WORK/cfg/kino"
-  printf "{ \"downloads\": { \"framesKept\": 1 } }\n" > "$WORK/cfg/kino/config.json"
+  local kino="$HOME/Library/Application Support/Kino"
 
   echo "== perf =="
-  XDG_CONFIG_HOME="$WORK/cfg" "$BIN" play > "$WORK/play.log" 2>&1 &
+  # play takes the installed config and library, with nothing to override either, so the run
+  # records the settings its numbers were taken under
+  echo "  live config, $(find "$kino/Wallpapers" -name '*.mp4' 2>/dev/null | wc -l | tr -d ' ') clips in the library:"
+  sed 's/^/  /' "$kino/config.json" 2>/dev/null || echo "  absent, so defaults"
+  "$BIN" play > "$WORK/play.log" 2>&1 &
   local pid=$!
   sleep 5
   if ! kill -0 $pid 2>/dev/null; then echo "  FAIL  renderer died: $(cat "$WORK/play.log")"; FAILED=$((FAILED + 1)); return; fi
@@ -70,10 +71,10 @@ perf() {
   check "apple agent after quit" "$(agent)" "up"
 }
 
-setup
+setup "${1:-}"
 REPORT="$REPORTS/${DATE}_$( [ "${1:-}" = "--perf" ] && echo perf || echo smk ).md"
 {
-  echo "# drift ${1:-} $DATE"
+  echo "# kino ${1:-} $DATE"
   echo
   echo '```'
   case "${1:-}" in
