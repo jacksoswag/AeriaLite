@@ -141,18 +141,20 @@ Sides are forced even, because 4:2:0 chroma requires it.
 
 ## Storage
 
-Everything lives under `~/Library/Application Support/AeriaLite/`.
+The library lives under `~/Library/Application Support/AeriaLite/`, and the transient half sits in `~/Library/Caches/AeriaLite/`.
 
 | Path | Holds |
 | --- | --- |
 | `config.json` | hand-edited settings, never written by the panel |
 | `wallpapers.json` | the catalogue and the view it was left on, fully owned by the panel |
-| `Wallpapers/` | the streamed cache, cleared on quit |
-| `Wallpapers/persistent/` | downloads, never evicted |
+| `Wallpapers/` | decoded downloads, never evicted |
+| `Caches/AeriaLite/` | every fetched master, streamed or offline alike |
 
-The whole root is bounded. Downloads land conformed at 1080p under a 2.5 Mbps cap and trimmed at 180 seconds, which measures 47 MB a clip against Apple's 145 MB masters, and the streamed half is evicted least-recently-used against `maxCache`. A 15-clip library measured 711 MB; the same 15 masters would be 2.2 GB and the full 152-clip catalogue about 22 GB.
+Every master lands in the cache regardless of how it was asked for, and what happens next is the only difference between a download and a stream: a download is decoded into `Wallpapers/` and its master deleted, while a streamed clip is decoded in place and stays evictable. Living in `Wallpapers/` is therefore the whole of what makes a clip read as downloaded, so `Entry` records nothing about it and `Library.isDownloaded` is a path prefix test. The cache being a standard `Library/Caches` location is what keeps it out of Time Machine.
 
-`Paths.ensure` moves `Application Support/Kino` to the current root when the old one exists and the new one does not, and `Migration.repoint` rewrites the absolute paths the catalogue stored under it. Both are one-shot and both can go once no install predates the rename.
+The whole root is bounded. Downloads land conformed at 1080p under a 2.5 Mbps cap and trimmed at 180 seconds, which measures 47 MB a clip against Apple's 145 MB masters, and the cache is evicted least-recently-used against `maxCache`. A 15-clip library measured 711 MB; the same 15 masters would be 2.2 GB and the full 152-clip catalogue about 22 GB.
+
+`Migration.flatten` empties the `Wallpapers/persistent/` subfolder that downloads used to sit in, moving its files up into `Wallpapers/` and repointing the rows that addressed them. One-shot, and it can go once no install predates the change.
 
 The filter is restored at launch from `wallpapers.json`, and `defaultView` in `config.json` overrides it when set, naming one filter or an array of them and matched case-insensitively. It overrides without recording, so removing the key returns to the remembered view. `AppState.select` is the only writer: persisting from the `filters` observer instead also catches the launch assignment, because a property with a default is already initialised by the time `init` runs, and `defaultView` would overwrite the view it stands in for.
 

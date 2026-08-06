@@ -5,7 +5,6 @@ import Foundation
 /// than inferring one from the entry's name.
 enum Migration {
     static func run(into catalog: inout Catalog) {
-        repoint(&catalog)
         adoptLegacyFolder(&catalog)
         flatten(&catalog)
         adopt(Paths.wallpapers, into: &catalog)
@@ -31,17 +30,6 @@ enum Migration {
             }
         }
         try? fm.removeItem(at: Paths.legacyPersistent)
-    }
-
-    /// Rows still addressing the Kino-era root, whose files `Paths.ensure` has already moved.
-    /// `adopt` would re-find them by name, but only for a title that survives the slug round trip.
-    private static func repoint(_ catalog: inout Catalog) {
-        let old = Paths.legacyRoot.path + "/"
-        for entry in catalog.entries where entry.source.path.hasPrefix(old) {
-            var row = entry
-            row.source.path = Paths.root.path + "/" + entry.source.path.dropFirst(old.count)
-            catalog.replace(row)
-        }
     }
 
     /// The pre-AeriaLite location. Files move rather than copy, so this runs exactly once.

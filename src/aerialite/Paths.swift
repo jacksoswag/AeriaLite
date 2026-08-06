@@ -5,10 +5,6 @@ enum Paths {
     static let root = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent("Library/Application Support/AeriaLite")
 
-    /// Where the same root sat under the old name. `Migration.repoint` fixes the rows afterwards.
-    static let legacyRoot = URL(fileURLWithPath: NSHomeDirectory())
-        .appendingPathComponent("Library/Application Support/Kino")
-
     static var config: URL { root.appendingPathComponent("config.json") }
     static var catalog: URL { root.appendingPathComponent("wallpapers.json") }
 
@@ -27,10 +23,6 @@ enum Paths {
 
     static func ensure() {
         let fm = FileManager.default
-        // ahead of the directory creation below, which would otherwise occupy the destination
-        if fm.fileExists(atPath: legacyRoot.path) && !fm.fileExists(atPath: root.path) {
-            try? fm.moveItem(at: legacyRoot, to: root)
-        }
         for dir in [root, wallpapers, downloads] {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
