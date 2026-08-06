@@ -12,11 +12,18 @@ enum Paths {
     static var config: URL { root.appendingPathComponent("config.json") }
     static var catalog: URL { root.appendingPathComponent("wallpapers.json") }
 
-    /// Streamed copies live here and are evicted against the size cap.
-    static var cache: URL { root.appendingPathComponent("Wallpapers") }
+    /// Decoded downloads, never evicted. Living here is the whole of what makes a clip read as
+    /// downloaded, so nothing in the catalogue has to record it.
+    static var wallpapers: URL { root.appendingPathComponent("Wallpapers") }
 
-    /// Downloaded copies live here and are never evicted.
-    static var persistent: URL { cache.appendingPathComponent("persistent") }
+    /// Every fetched master, streamed or offline alike. A download leaves when conform decodes it
+    /// into wallpapers/; a streamed clip stays until the size cap evicts it. Under Library/Caches
+    /// so macOS keeps it out of Time Machine and a cache sweep can find it by convention.
+    static let downloads = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Caches/AeriaLite")
+
+    /// Where downloads sat before they were flattened into wallpapers/. `Migration.flatten` empties it.
+    static var legacyPersistent: URL { wallpapers.appendingPathComponent("persistent") }
 
     static func ensure() {
         let fm = FileManager.default
@@ -24,14 +31,9 @@ enum Paths {
         if fm.fileExists(atPath: legacyRoot.path) && !fm.fileExists(atPath: root.path) {
             try? fm.moveItem(at: legacyRoot, to: root)
         }
-        for dir in [root, cache, persistent] {
+        for dir in [root, wallpapers, downloads] {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
-    }
-
-    /// Filenames are the entry's name, so the folder reads the way the panel does.
-    static func file(named name: String, persistent isPersistent: Bool) -> URL {
-        (isPersistent ? persistent : cache).appendingPathComponent(name).appendingPathExtension("mp4")
     }
 
     static func size(of url: URL) -> Int64 {

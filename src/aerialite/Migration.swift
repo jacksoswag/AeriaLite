@@ -7,9 +7,30 @@ enum Migration {
     static func run(into catalog: inout Catalog) {
         repoint(&catalog)
         adoptLegacyFolder(&catalog)
-        adopt(Paths.persistent, into: &catalog)
-        adopt(Paths.cache, into: &catalog)
+        flatten(&catalog)
+        adopt(Paths.wallpapers, into: &catalog)
         forgetMissing(&catalog)
+    }
+
+    /// Downloads used to sit in a persistent/ subfolder that meant "never evict". Living in
+    /// wallpapers/ carries that meaning now, so the folder is emptied into its parent and the rows
+    /// addressing it are moved with their files. A name already taken in wallpapers/ is the same
+    /// clip streamed, and the download is the better copy, so it wins.
+    private static func flatten(_ catalog: inout Catalog) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: Paths.legacyPersistent,
+                                                      includingPropertiesForKeys: nil) else { return }
+        for file in files where file.pathExtension.lowercased() == "mp4" {
+            let target = Paths.wallpapers.appendingPathComponent(file.lastPathComponent)
+            try? fm.removeItem(at: target)
+            guard (try? fm.moveItem(at: file, to: target)) != nil else { continue }
+            for entry in catalog.entries where entry.source.path == file.path {
+                var row = entry
+                row.source.path = target.path
+                catalog.replace(row)
+            }
+        }
+        try? fm.removeItem(at: Paths.legacyPersistent)
     }
 
     /// Rows still addressing the Kino-era root, whose files `Paths.ensure` has already moved.
@@ -30,7 +51,7 @@ enum Migration {
         else { return }
         for file in files where file.pathExtension.lowercased() == "mp4" {
             let title = Library.title(for: file.deletingPathExtension().lastPathComponent)
-            let target = Paths.persistent.appendingPathComponent(Library.slug(for: title))
+            let target = Paths.wallpapers.appendingPathComponent(Library.slug(for: title))
                                          .appendingPathExtension("mp4")
             guard (try? FileManager.default.moveItem(at: file, to: target)) != nil else { continue }
             claim(title: title, path: target, into: &catalog)

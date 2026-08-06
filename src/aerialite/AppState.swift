@@ -22,7 +22,7 @@ import Combine
     private var wanted: String?          // a clip clicked before it existed locally
     private var displays: [String] = []
     private var lastPlaying = ""         // drives cache maintenance off track changes
-    private var queued: [(Entry, URL, Settings.Playback)] = []   // conforms waiting their turn
+    private var queued: [(Entry, URL, URL, Settings.Playback)] = []   // conforms waiting their turn
     private var encodingNow = false
 
     /// What the panel lists and what the player queues, which are the same thing: filtering a
@@ -74,7 +74,7 @@ import Combine
         pushPlaylist()
     }
 
-    /// Downloading keeps an encoded copy in persistent/; un-downloading deletes it and the clip
+    /// Downloading keeps a decoded copy in wallpapers/; un-downloading deletes it and the clip
     /// goes back to being streamed on demand.
     func toggleDownload(_ entry: Entry) {
         var row = entry
@@ -85,17 +85,14 @@ import Combine
             catalog.save()
             return pushPlaylist()
         }
-        // a streamed copy is already the same master, so promote it rather than fetching again
-        if let cached = Library.variants(row, in: Paths.cache).first {
-            let target = Paths.persistent.appendingPathComponent(cached.lastPathComponent)
-            try? FileManager.default.removeItem(at: target)
-            if (try? FileManager.default.moveItem(at: cached, to: target)) != nil {
-                row.source.path = target.path
-                catalog.replace(row)
-                catalog.save()
-                pushPlaylist()
-                return conform(row, at: target, using: settings.downloads)
-            }
+        // a master already in downloads/ is the same bits the fetch would pull, so decode that
+        // instead. The row plays it while the encode runs and repoints when the decode lands.
+        if let cached = Library.variants(row, in: Paths.downloads).first {
+            row.source.path = cached.path
+            catalog.replace(row)
+            catalog.save()
+            pushPlaylist()
+            return conform(row, at: cached, into: Paths.wallpapers, using: settings.downloads)
         }
         guard !row.source.link.isEmpty else { return }      // nothing to fetch from
         fetch(row, offline: true)
@@ -223,22 +220,30 @@ import Combine
         if wanted == row.name { wanted = nil; play(row) }
     }
 
-    /// Encodes a file already on disk down to the download profile, in place. Strictly one at a
-    /// time: each conform is a hardware encode competing with playback for the same media engine,
-    /// and three of them at once is visible stutter.
-    private func conform(_ entry: Entry, at file: URL, using profile: Settings.Playback) {
-        queued.append((entry, file, profile))
+    /// Encodes a file already on disk down to the given profile, landing it in `folder`. Strictly
+    /// one at a time: each conform is a hardware encode competing with playback for the same media
+    /// engine, and three of them at once is visible stutter.
+    private func conform(_ entry: Entry, at file: URL, into folder: URL, using profile: Settings.Playback) {
+        queued.append((entry, file, folder, profile))
         encoding.insert(entry.name)
         drain()
     }
 
     private func drain() {
         guard !encodingNow, !queued.isEmpty else { return }
-        let (entry, file, profile) = queued.removeFirst()
+        let (entry, file, folder, profile) = queued.removeFirst()
         encodingNow = true
-        Library.conform(file, using: profile) { _ in
+        Library.conform(file, into: folder, using: profile) { landed in
             self.encodingNow = false
             self.encoding.remove(entry.name)
+            // a decode into wallpapers/ is a new path, and the row has to follow it or the clip
+            // reads as streamed and gets evicted out from under the catalogue
+            if let landed, landed.path != file.path {
+                var row = entry
+                row.source.path = landed.path
+                self.catalog.replace(row)
+                self.catalog.save()
+            }
             let cache = self.settings.maxCache
             let keep = file.deletingPathExtension().lastPathComponent
             DispatchQueue.global(qos: .utility).async { Library.trimCache(cache, keeping: keep) }
@@ -251,11 +256,13 @@ import Combine
     /// clip is on screen almost immediately rather than after a multi-minute encode. conform then
     /// rewrites the same path, and every clip is re-read from disk when it comes round again, so
     /// the encode swaps itself in at a loop or track change instead of cutting into what is on
-    /// screen. Streamed clips keep the source's own bits per pixel; only persistent/ takes a cap.
+    /// screen. Streamed clips keep the source's own bits per pixel; only a download takes a cap,
+    /// and only a download's decode leaves downloads/ for wallpapers/.
     private func fetch(_ entry: Entry, offline: Bool, fallback: URL? = nil) {
         progress[entry.name] = 0
         let profile = offline ? settings.downloads : settings.streams
-        watches[entry.name] = Library.fetch(entry, offline: offline, fallback: fallback,
+        let folder = offline ? Paths.wallpapers : Paths.downloads
+        watches[entry.name] = Library.fetch(entry, fallback: fallback,
                                             progress: { [weak self] done in
             self?.progress[entry.name] = done
         }, done: { [weak self] landed in
@@ -265,14 +272,11 @@ import Combine
             guard let landed else { return }
             var row = entry
             row.source.path = landed
-            // the persistent copy takes over the instant it lands, so the row never drops back to
-            // streamed while the encode runs
-            if offline { Library.dropCached(entry) }
             self.catalog.replace(row)
             self.catalog.save()
             self.pushPlaylist()
             if self.wanted == entry.name { self.wanted = nil; self.play(row) }
-            self.conform(row, at: URL(fileURLWithPath: landed), using: profile)   // queued, never concurrent
+            self.conform(row, at: URL(fileURLWithPath: landed), into: folder, using: profile)   // queued, never concurrent
         })
     }
 

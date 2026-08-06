@@ -12,7 +12,7 @@ enum Prep {
         }
         let cfg = Settings.load().downloads
         let input = URL(fileURLWithPath: (first as NSString).expandingTildeInPath)
-        var output = Paths.persistent.appendingPathComponent(input.deletingPathExtension().lastPathComponent)
+        var output = Paths.wallpapers.appendingPathComponent(input.deletingPathExtension().lastPathComponent)
                                       .appendingPathExtension("mp4")
         var keep = cfg.framesKept, bitrate = cfg.bitrate
         var size = cfg.size

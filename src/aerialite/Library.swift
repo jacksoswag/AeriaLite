@@ -24,9 +24,9 @@ enum Library {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    /// A copy left in persistent/ by an earlier download. Storage names are fixed when a file
-    /// lands and never track renames, so the slug is the whole lookup.
-    static func stored(_ entry: Entry) -> URL? { variants(entry, in: Paths.persistent).first }
+    /// A decoded copy left in wallpapers/ by an earlier download. Storage names are fixed when a
+    /// file lands and never track renames, so the slug is the whole lookup.
+    static func stored(_ entry: Entry) -> URL? { variants(entry, in: Paths.wallpapers).first }
 
     /// Files predating the slug carry the display name verbatim, spaces and all, so a download
     /// wrote a hyphenated sibling instead of replacing them. Both spellings count as the same clip.
@@ -37,15 +37,9 @@ enum Library {
         }.filter { fm.fileExists(atPath: $0.path) }
     }
 
-    /// The streamed copy of a clip that has just been downloaded. Dropping it means the row reads
-    /// as downloaded from the moment the master lands, not once the encode finishes.
-    static func dropCached(_ entry: Entry) {
-        for url in variants(entry, in: Paths.cache) { try? FileManager.default.removeItem(at: url) }
-    }
-
     static func isDownloaded(_ entry: Entry) -> Bool {
         guard let url = playable(entry) else { return false }
-        return url.path.hasPrefix(Paths.persistent.path)
+        return url.path.hasPrefix(Paths.wallpapers.path)
     }
 
     /// Storage name is fixed when a file lands and never tracks the display name afterwards.
@@ -56,14 +50,21 @@ enum Library {
 
     /// Only ever removes files AeriaLite put in its own folders; a hand-pointed path is left alone.
     static func delete(_ entry: Entry) {
-        guard let url = playable(entry), url.path.hasPrefix(Paths.cache.path) else { return }
+        guard let url = playable(entry),
+              url.path.hasPrefix(Paths.wallpapers.path) || url.path.hasPrefix(Paths.downloads.path)
+        else { return }
         try? FileManager.default.removeItem(at: url)
     }
 
     /// Transcodes a freshly fetched master down to the configured profile, out of process so a
     /// failure in the encoder cannot take the agent with it, then deletes the master. This is
     /// what makes a streamed clip cost the same as a downloaded one rather than 350 MB of 4K.
-    static func conform(_ file: URL, using profile: Settings.Playback, done: @escaping (URL?) -> Void) {
+    ///
+    /// `into` is where the decode lands: wallpapers/ promotes the clip to downloaded, downloads/
+    /// rewrites it in place and leaves it evictable. Reports the path the decode actually took,
+    /// which is the master's own when the encode failed.
+    static func conform(_ file: URL, into folder: URL, using profile: Settings.Playback,
+                        done: @escaping (URL?) -> Void) {
         let binary = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
         // outside the scanned folders on purpose: an in-flight temp file dropped into cache/
         // gets adopted by Migration as a library entry of its own
@@ -84,23 +85,26 @@ enum Library {
         task.arguments = args
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
+        let final = folder.appendingPathComponent(file.lastPathComponent)
         task.terminationHandler = { proc in
-            let ok = proc.terminationStatus == 0 && FileManager.default.fileExists(atPath: out.path)
+            let fm = FileManager.default
+            let ok = proc.terminationStatus == 0 && fm.fileExists(atPath: out.path)
+            var landed = file
             if ok {
-                try? FileManager.default.removeItem(at: file)          // the master has served its purpose
-                try? FileManager.default.moveItem(at: out, to: file)
+                try? fm.removeItem(at: file)                 // the master has served its purpose
+                try? fm.removeItem(at: final)                // an older decode of the same clip
+                if (try? fm.moveItem(at: out, to: final)) != nil { landed = final }
             }
-            try? FileManager.default.removeItem(at: scratch)
-            DispatchQueue.main.async { done(file) }                    // master kept if the encode failed
+            try? fm.removeItem(at: scratch)
+            DispatchQueue.main.async { done(landed) }        // master kept where it is if the encode failed
         }
         guard (try? task.run()) != nil else { return done(file) }
     }
 
-    /// The streamed half only. persistent/ lives inside this folder, so this deletes files rather
-    /// than the directory, and never recurses into the downloads.
+    /// The undecoded masters only. Decoded downloads sit in wallpapers/ and this never reaches them.
     static func clearCache() {
         let fm = FileManager.default
-        guard let found = try? fm.contentsOfDirectory(at: Paths.cache, includingPropertiesForKeys: nil)
+        guard let found = try? fm.contentsOfDirectory(at: Paths.downloads, includingPropertiesForKeys: nil)
         else { return }
         for file in found where file.pathExtension.lowercased() == "mp4" {
             try? fm.removeItem(at: file)
@@ -128,14 +132,14 @@ enum Library {
         }
     }
 
-    /// Evicts the least recently used streamed files until the cache fits. persistent/ is never
-    /// touched, and `keep` is whatever is on screen right now.
+    /// Evicts the least recently used masters until the cache fits. wallpapers/ is never touched,
+    /// and `keep` is whatever is on screen right now.
     /// Two caps, count and bytes. capAtHigh keeps whichever allows more; otherwise the tighter
     /// of the two binds, which is the safer default.
     static func trimCache(_ cache: Settings.Cache, keeping keep: String?) {
         clearAppleWallpaperCaches()      // AeriaLite owns the desktop; nothing of Apple's should survive a cache pass
         let fm = FileManager.default
-        guard let found = try? fm.contentsOfDirectory(at: Paths.cache,
+        guard let found = try? fm.contentsOfDirectory(at: Paths.downloads,
                                                       includingPropertiesForKeys: [.contentAccessDateKey])
         else { return }
         var files = found.filter { $0.pathExtension.lowercased() == "mp4" }
@@ -157,20 +161,21 @@ enum Library {
         }
     }
 
-    /// Downloads to persistent/ when `offline`, otherwise into the streamed cache, reporting
-    /// fraction complete as it goes. This is the only place a filename is chosen.
+    /// Every master lands in downloads/ regardless of `offline`, reporting fraction complete as it
+    /// goes. What differs afterwards is where conform puts the decode. This is the only place a
+    /// filename is chosen.
     /// `fallback` is this same clip's downloaded copy, used when the link cannot carry the
     /// stream. It is never another wallpaper: a slow network changes where a clip comes from,
     /// never which clip plays.
     @discardableResult
-    static func fetch(_ entry: Entry, offline: Bool, fallback: URL? = nil,
+    static func fetch(_ entry: Entry, fallback: URL? = nil,
                       progress: @escaping (Double) -> Void,
                       done: @escaping (String?) -> Void) -> NSKeyValueObservation? {
         guard !entry.source.link.isEmpty, let remote = URL(string: entry.source.link) else {
             done(fallback?.path); return nil
         }
         Paths.ensure()
-        let folder = offline ? Paths.persistent : Paths.cache
+        let folder = Paths.downloads
         let target = folder.appendingPathComponent(slug(for: entry.name)).appendingPathExtension("mp4")
         let settled = Settled()
         let task = URLSession.shared.downloadTask(with: remote) { temp, _, _ in
