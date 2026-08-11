@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPS="${APPS:-$HOME/Applications}"
-BIN_DIR="${BIN_DIR:-$HOME/Utils/local/bin}"
+BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aerialite"
 LABEL="com.jacksonadams.aerialite"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"

@@ -1,40 +1,61 @@
+<div align="center">
+
+<img src="icon.png" width="120" alt="AeriaLite">
+
 # AeriaLite
 
-Apple's aerial footage as a macOS wallpaper, for **18 MB** of memory and about 1% of one core.
+**Apple's aerial footage as a live macOS wallpaper, for 18 MB of memory and about 1% of one core.**
 
-A lighter alternative to [Aerial](https://github.com/AerialScreensaver/Aerial). Same 152 clips of 4K SDR at 239.76fps, drawn as a wallpaper rather than a screensaver, stored at roughly a third the bytes, with the cost measured and published rather than assumed.
+[![Swift](https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white)](https://swift.org)
+[![Platform](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)](#install)
+[![Dependencies](https://img.shields.io/badge/dependencies-0-2ea043)](Package.swift)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Playing 2940x1912 HEVC costs 18 MB of physical footprint, dropping to 0.0% CPU when a fullscreen space hides it. The renderer reads *compressed* samples and hands them straight to the compositor, so the decoded picture lives in IOSurfaces that belong to WindowServer and are charged to no process.
+</div>
+
+A lighter alternative to [Aerial](https://github.com/AerialScreensaver/Aerial), written in Swift against public AppKit, AVFoundation and SwiftUI, with nothing else linked in. The same 152 clips of Apple's 4K aerial catalogue, drawn as a wallpaper instead of a screensaver, stored at roughly a third of the bytes, with the cost measured and published rather than assumed.
+
+The renderer never materialises a decoded frame. `AVAssetReaderTrackOutput` in passthrough mode hands *compressed* sample buffers of a few tens of KB straight to `AVSampleBufferDisplayLayer`, so decode happens inside the compositor's own VideoToolbox session against IOSurfaces charged to no process. 2,251 lines of Swift, one borderless window per screen, and no menu bar item you did not ask for.
+
+## Measured
+
+On an M3, playing a 2940x1912 HEVC clip:
+
+| | |
+| --- | --- |
+| Memory while playing | **18 MB** `phys_footprint`, 24 MB against an un-conformed 4K/240 master |
+| CPU | ~1% of one core, **0.0%** once a fullscreen space hides it |
+| IOSurface pages charged to the process | none |
+| Stored per clip | **47 MB** average, against the 145 MB master Apple ships |
+| A real 15-clip library | 711 MB |
+
+Memory does not move with library size, cache depth, resolution or framerate. One reader is open at a time and 18 MB is close to framework baseline, so there is no setting that improves it.
+
+```bash
+footprint -p $(pgrep -f aerialite.app)
+```
 
 ## Against Aerial
 
-|  | AeriaLite | Aerial 4.x |
-| --- | --- | --- |
-| Primary mode | wallpaper | screensaver; wallpaper in the 4.1 beta |
-| How it draws | one borderless window per screen, its own player | macOS's App Extension host, wallpaper set through PaperSaver |
-| Memory while playing | 18 MB `phys_footprint`, measured | not published |
-| Stored per clip | 47 MB average, conformed to 1080p at 2.5 Mbps | Apple's file as downloaded; the 4K masters run 145 MB per 137 seconds |
-| Library ceiling | a byte and count cap you set, 3 GB by default | no published cap |
-| Feature surface | playlist, transport, cache policy | overlays, weather, time-of-day, live cams, shortcuts |
-| Runtime dependencies | none | Sparkle, KeyboardShortcuts, PaperSaver, an OpenWeather key |
+|                      | AeriaLite                                        | Aerial 4.x                                                            |
+| -------------------- | ------------------------------------------------ | --------------------------------------------------------------------- |
+| Primary mode         | wallpaper                                        | screensaver; wallpaper in the 4.1 beta                                |
+| How it draws         | one borderless window per screen, its own player | macOS's App Extension host, wallpaper set through PaperSaver          |
+| Memory while playing | 18 MB `phys_footprint`, measured                 | not published                                                         |
+| Stored per clip      | 47 MB average, conformed to 1080p at 2.5 Mbps    | Apple's file as downloaded; the 4K masters run 145 MB per 137 seconds |
+| Library ceiling      | a byte and count cap you set, 3 GB by default    | no published cap                                                      |
+| Feature surface      | playlist, transport, cache policy                | overlays, weather, time-of-day, live cams, shortcuts                  |
+| Runtime dependencies | none                                             | Sparkle, KeyboardShortcuts, PaperSaver, an OpenWeather key            |
 
-Aerial publishes no memory figure and this project has not measured one, so the memory row is a falsifiable claim about AeriaLite rather than a benchmark against Aerial. Run `footprint -p $(pgrep aerialite)` and check it.
+Aerial publishes no memory figure and this project has not measured one, so the memory row is a falsifiable claim about AeriaLite rather than a benchmark against Aerial. Run the command above and check it.
 
 Aerial is the better choice if you want a screensaver, overlays, or live camera feeds. This is the better choice if you want a wallpaper whose cost you can name.
 
 ## Why not the built-in one
 
-macOS routes video wallpapers through `idleassetsd` and a `WallpaperVideoExtension`, which keeps a managed asset store, crossfade machinery, and a decoder running whether or not anything is looking at it. None of it is configurable and all of it is resident. WallpaperAgent alone measures 10 MB before a single frame is drawn.
+macOS routes video wallpapers through `idleassetsd` and a `WallpaperVideoExtension`, which keeps a managed asset store, crossfade machinery, and a decoder running whether or not anything is looking at it. None of it is configurable and all of it is resident. `WallpaperAgent` alone measures 10 MB before a single frame is drawn.
 
-AeriaLite is one borderless `NSWindow` per screen hosting an `AVSampleBufferDisplayLayer`, using public AppKit and AVFoundation plus one private call to place the window on every Space.
-
-Starting it boots `com.apple.wallpaper.agent` out of the login session, so nothing of Apple's is decoding behind a picture you cannot see. Killing it alone does nothing, since launchd has it back in under two seconds. Quitting AeriaLite bootstraps the agent back and hands the desktop over.
-
-## How it stays small
-
-`AVAssetReaderTrackOutput` with `outputSettings: nil` is the whole trick. Passthrough yields sample buffers of a few tens of KB rather than 24 MB frames, and decode happens inside the display layer's own VideoToolbox session. The file stays on disk and is read through the unified buffer cache, where pages are purgeable and belong to nobody.
-
-Memory does not move with library size, cache depth, resolution or framerate. One reader is open at a time, and the 18 MB is close to framework baseline.
+Starting AeriaLite boots `com.apple.wallpaper.agent` out of the login session, so nothing of Apple's is decoding behind a picture you cannot see. Killing it alone does nothing, since launchd has it back in under two seconds. Quitting AeriaLite bootstraps the agent back and hands the desktop over.
 
 ## How it stays off your disk
 
@@ -47,12 +68,19 @@ Streamed clips are evicted least-recently-used against a byte and count cap, so 
 ## Install
 
 ```bash
-./scripts/install.sh
+git clone https://github.com/jacksoswag/AeriaLite.git
+cd AeriaLite && ./scripts/install.sh
 ```
 
-Builds release, bundles `aerialite.app` into `~/Applications`, symlinks `aerialite` onto your PATH, and registers a login agent so the wallpaper is up before you are.
+Builds release, bundles `aerialite.app` into `~/Applications`, symlinks `aerialite` onto your PATH, and registers a login agent so the wallpaper is up before you are. Set `APPS` or `BIN_DIR` to put either somewhere else.
 
-Requires macOS 15+ and a Swift toolchain. No dependencies.
+Then fill the library:
+
+```bash
+aerialite catalog
+```
+
+Requires a Swift toolchain. `Package.swift` targets macOS 14; everything here was built and measured on macOS 26, and nothing older has been tried.
 
 ## Use
 
@@ -69,7 +97,7 @@ aerialite prep <input> [-o out] [--keep 0-1] [--size WxH] [--bitrate BPS] [--key
 
 ## Configuration
 
-`~/Library/Application Support/AeriaLite/config.json` is hand-edited and never written by the panel. `wallpapers.json` beside it is the opposite: fully owned by the UI, so nothing needs a text editor to change what plays.
+`~/Library/Application Support/AeriaLite/config.json` is hand-edited and never written by the panel. `wallpapers.json` beside it is the opposite, fully owned by the UI, so nothing needs a text editor to change what plays.
 
 ```json
 {
@@ -96,11 +124,27 @@ A fetch lands Apple's master in about 1.5 seconds and plays it immediately. The 
 
 Nothing waits on the encoder, which matters more than it sounds: 137 seconds of 120fps video is 16,000 frames, the same count as nine minutes of ordinary 30fps footage. Conforms run strictly one at a time, at background priority, out of process.
 
+## Build and test
+
+```bash
+swift build -c release -Xswiftc -gnone
+./tests/run-tests.sh --smk    # encodes a generated clip, checks the output profile
+./tests/run-tests.sh --perf   # plays it and samples the renderer's cost
+```
+
+`-gnone` is required on toolchains shipping without `dsymutil`, where a release build otherwise fails at the debug-symbol step. Runs land in `tests/reports/`, which is where every number above comes from.
+
 ## Layout
 
 ```
-src/aerialite/  renderer, transcoder, catalogue, panel
-tests/          run-tests.sh --smk --perf, reports/
-scripts/        build.sh, bundle.sh, install.sh
-docs/           technical-spec.md
+src/aerialite/       renderer, transcoder, catalogue, panel
+scripts/             install.sh, bundle.sh, fetch-aerials.sh, trim.sh, to-av1.sh
+tests/               run-tests.sh --smk --perf, reports/
+technical-spec.md    module by module: the gate, Spaces, threading, storage
 ```
+
+[`technical-spec.md`](technical-spec.md) carries the parts worth reading before changing anything: why `NSWindow.occlusionState` is unusable below normal window level, which `collectionBehavior` flags drag the active Space, and why `minFrameDuration` is the tightest gap between frames rather than the average.
+
+## Credits
+
+The footage is Apple's and stays Apple's; this fetches it from the same manifest the system does. [Aerial](https://github.com/AerialScreensaver/Aerial) did the catalogue work first, and its source is where the macOS 240fps manifest URL is recoverable from. The code here is MIT, see [LICENSE](LICENSE).
