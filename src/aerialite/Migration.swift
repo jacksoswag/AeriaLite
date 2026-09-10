@@ -5,10 +5,26 @@ import Foundation
 /// than inferring one from the entry's name.
 enum Migration {
     static func run(into catalog: inout Catalog) {
+        removeAbandonedWork()
         adoptLegacyFolder(&catalog)
         flatten(&catalog)
         adopt(Paths.wallpapers, into: &catalog)
+        forgetTransient(&catalog)
         forgetMissing(&catalog)
+    }
+
+    /// A forced quit can stop the encoder between writing its hidden staging file and atomically
+    /// replacing the original. Such files were never committed and are safe to remove on launch.
+    private static func removeAbandonedWork() {
+        for folder in [Paths.wallpapers, Paths.downloads] {
+            guard let files = try? FileManager.default.contentsOfDirectory(at: folder,
+                                                                           includingPropertiesForKeys: nil)
+            else { continue }
+            for file in files where file.lastPathComponent.hasPrefix(".")
+                && file.lastPathComponent.contains(".aerialite.") {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
     }
 
     /// Downloads used to sit in a persistent/ subfolder that meant "never evict". Living in
@@ -21,8 +37,7 @@ enum Migration {
                                                       includingPropertiesForKeys: nil) else { return }
         for file in files where file.pathExtension.lowercased() == "mp4" {
             let target = Paths.wallpapers.appendingPathComponent(file.lastPathComponent)
-            try? fm.removeItem(at: target)
-            guard (try? fm.moveItem(at: file, to: target)) != nil else { continue }
+            guard Library.land(file, at: target) else { continue }
             for entry in catalog.entries where entry.source.path == file.path {
                 var row = entry
                 row.source.path = target.path
@@ -41,7 +56,10 @@ enum Migration {
             let title = Library.title(for: file.deletingPathExtension().lastPathComponent)
             let target = Paths.wallpapers.appendingPathComponent(Library.slug(for: title))
                                          .appendingPathExtension("mp4")
-            guard (try? FileManager.default.moveItem(at: file, to: target)) != nil else { continue }
+            // A library already committed under the new root wins. Leave the older source in
+            // place for manual recovery instead of overwriting a known-good current download.
+            guard FileManager.default.fileExists(atPath: target.path)
+                    || Library.land(file, at: target) else { continue }
             claim(title: title, path: target, into: &catalog)
         }
     }
@@ -62,19 +80,41 @@ enum Migration {
     /// Attaches a file to the catalogue row of the same name when there is one, so a downloaded
     /// clip lands on its own catalogue entry instead of creating a near-duplicate beside it.
     private static func claim(title: String, path: URL, into catalog: inout Catalog) {
-        var row = catalog.entries.first { $0.name == title }
-            ?? Entry(name: catalog.unique(title))
-        guard row.source.path.isEmpty || Library.playable(row) == nil else { return }
+        let stem = path.deletingPathExtension().lastPathComponent
+        let existing = catalog.entries.first { $0.storage == stem || $0.name == title }
+        var row = existing ?? Entry(name: catalog.unique(title))
+        if !row.source.path.isEmpty {
+            let recorded = URL(fileURLWithPath: (row.source.path as NSString).expandingTildeInPath)
+            let durableElsewhere = FileManager.default.fileExists(atPath: recorded.path)
+                && !Library.isInside(recorded, Paths.downloads)
+                && recorded.standardizedFileURL != path.standardizedFileURL
+            guard !durableElsewhere else { return }
+        }
         row.source.path = path.path
-        if row.position == 0 { row.position = catalog.entries.count }
-        if catalog.entries.contains(where: { $0.name == row.name }) { catalog.replace(row) }
+        if existing == nil { row.position = catalog.entries.count }
+        if existing != nil { catalog.replace(row) }
         else { catalog.append(row) }
+    }
+
+    /// Older builds persisted streamed cache paths. They become stale by design whenever the LRU
+    /// runs or the app quits, which made wallpapers.json appear to lose downloads. Cache presence
+    /// is now derived from `storage`; only durable/user-selected paths remain in the catalogue.
+    private static func forgetTransient(_ catalog: inout Catalog) {
+        for entry in catalog.entries where !entry.source.path.isEmpty {
+            let url = URL(fileURLWithPath: (entry.source.path as NSString).expandingTildeInPath)
+            guard Library.isInside(url, Paths.downloads) else { continue }
+            var row = entry
+            row.source.path = ""
+            catalog.replace(row)
+        }
     }
 
     /// A row whose file has gone forgets the path, so it reads as streamable rather than sitting
     /// pointed at nothing.
     private static func forgetMissing(_ catalog: inout Catalog) {
-        for entry in catalog.entries where !entry.source.path.isEmpty && Library.playable(entry) == nil {
+        for entry in catalog.entries where !entry.source.path.isEmpty {
+            let url = URL(fileURLWithPath: (entry.source.path as NSString).expandingTildeInPath)
+            guard !FileManager.default.fileExists(atPath: url.path) else { continue }
             var row = entry
             row.source.path = ""
             catalog.replace(row)
@@ -111,24 +151,24 @@ enum CatalogImport {
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let assets = root["assets"] as? [[String: Any]] else { fail("manifest had no assets") }
 
-        // Apple ships several clips per place, so a bare label collides; number them in shot order
-        // rather than letting unique() scatter suffixes arbitrarily.
-        var seen: [String: Int] = [:]
         var added = 0, linked = 0
         for asset in assets.sorted(by: { ($0["shotID"] as? String ?? "") < ($1["shotID"] as? String ?? "") }) {
-            guard let link = asset["url-4K-SDR-240FPS"] as? String else { continue }
+            guard let link = asset["url-4K-SDR-240FPS"] as? String,
+                  let shotID = asset["shotID"] as? String else { continue }
             let label = (asset["accessibilityLabel"] as? String) ?? "Aerial"
-            seen[label, default: 0] += 1
-            let name = seen[label]! == 1 ? label : "\(label) \(seen[label]!)"
+            let name = CatalogNames.title(label: label, shotID: shotID)
 
             if let index = catalog.entries.firstIndex(where: { $0.source.link == link }) {
                 catalog.entries[index].source.link = link
+                catalog.entries[index].name = name
+                if catalog.entries[index].storage.isEmpty { catalog.entries[index].storage = shotID }
                 linked += 1
             } else if let index = catalog.entries.firstIndex(where: { $0.name == name }) {
                 catalog.entries[index].source.link = link      // an already-local clip gains its origin
                 linked += 1
             } else {
-                catalog.append(Entry(name: name, source: Source(link: link)))
+                catalog.append(Entry(name: name, source: Source(link: link),
+                                     id: (asset["id"] as? String) ?? shotID, storage: shotID))
                 added += 1
             }
         }

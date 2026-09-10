@@ -2,7 +2,7 @@ import AVFoundation
 import AppKit
 import VideoToolbox
 
-/// Transcodes a source clip to the profile the renderer wants: HEVC in MP4, no audio track,
+/// Transcodes a source clip to the profile native playback wants: HEVC in MP4, no audio track,
 /// at a chosen size, cadence and bitrate. Hardware encodes through VideoToolbox, which is
 /// what AVAssetWriter picks for HEVC on Apple silicon.
 enum Prep {

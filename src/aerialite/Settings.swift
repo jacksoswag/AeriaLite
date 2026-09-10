@@ -36,26 +36,21 @@ struct Settings: Codable {
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
             videos = try c.decodeIfPresent(Int.self, forKey: .videos) ?? videos
-            if let text = try? c.decodeIfPresent(String.self, forKey: .space) { space = text ?? space }
-            else if let number = try? c.decodeIfPresent(Int.self, forKey: .space) { space = String(number ?? 512) }
+            if let text = try? c.decode(String.self, forKey: .space) { space = text }
+            else if let number = try? c.decode(Int.self, forKey: .space) { space = String(number) }
             capAtHigh = try c.decodeIfPresent(Bool.self, forKey: .capAtHigh) ?? false
         }
 
-        var bytes: Int64 { Int64(Double(space) ?? 512) * 1_000_000 }
+        var bytes: Int64 { Int64(max(0, Double(space) ?? 512) * 1_000_000) }
     }
-
-    /// Ascending, so the number reads the way the key does: 0 stops and hides the window,
-    /// 1 freezes the frame and keeps the position, 2 keeps playing regardless.
-    enum Fullscreen: Int, Codable { case stop = 0, pause = 1, play = 2 }
 
     /// Streamed clips keep the source's own bits per pixel at the display.s native size; a
     /// download trades quality for a file worth keeping. Both conform, one at a time.
     var streams = Playback()
     var downloads = Playback()
     var defSpeed = 1.0
-    var playWhileFullscreen = 1
     var maxCache = Cache()
-    /// 0 plays only what is on disk and greys the rest, 1 prefers persistent/ and fetches what
+    /// 0 plays only what is on disk and greys the rest, 1 prefers Wallpapers/ and fetches what
     /// is missing, 2 streams everything and falls back to this clip.s own downloaded copy when
     /// the link cannot carry it. The fallback is always the same wallpaper, never a different one.
     var streamMode = 1
@@ -63,8 +58,6 @@ struct Settings: Codable {
     /// used, which the catalogue remembers.
     var defaultView: [String] = []
     static let slowBitsPerSecond = 5_000_000.0
-
-    var onFullscreen: Fullscreen { Fullscreen(rawValue: playWhileFullscreen) ?? .pause }
 
     /// nil when unset or when nothing in it names a real filter, which is what lets the caller
     /// fall through to the remembered view instead of opening on an empty list.
@@ -80,7 +73,6 @@ struct Settings: Codable {
         streams = try c.decodeIfPresent(Playback.self, forKey: .streams) ?? streams
         downloads = try c.decodeIfPresent(Playback.self, forKey: .downloads) ?? downloads
         defSpeed = try c.decodeIfPresent(Double.self, forKey: .defSpeed) ?? defSpeed
-        playWhileFullscreen = try c.decodeIfPresent(Int.self, forKey: .playWhileFullscreen) ?? playWhileFullscreen
         maxCache = try c.decodeIfPresent(Cache.self, forKey: .maxCache) ?? maxCache
         streamMode = try c.decodeIfPresent(Int.self, forKey: .streamMode) ?? streamMode
         // one name or several, since a single view is the common case and quoting it as a bare
@@ -106,7 +98,7 @@ struct Settings: Codable {
         seed.downloads.framesKept = 0.25
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try? encoder.encode(seed).write(to: Paths.config)
+        try? encoder.encode(seed).write(to: Paths.config, options: .atomic)
     }
 }
 

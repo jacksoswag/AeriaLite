@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 /// Menu bar agent. No dock icon, no windows of its own beyond the popover, so the only thing
@@ -21,13 +22,10 @@ import SwiftUI
         exit(0)
     }
 
-    /// Quitting hands the desktop back to macOS, agent included. The streamed cache is throwaway
-    /// by definition and downloads are not, so only the former goes; anything macOS cached for
-    /// AeriaLite goes with it.
+    /// The wallpaper extension is owned by WallpaperAgent and survives the menu app. Only tell it
+    /// to stop playback; the bounded cache remains warm and durable downloads are untouched.
     func applicationWillTerminate(_ note: Notification) {
-        Library.clearCache()
-        Library.clearAppleWallpaperCaches()
-        AppleWallpaper.restore()
+        state.shutdown()
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
@@ -43,14 +41,27 @@ import SwiftUI
         // the panel is built on first open, so SwiftUI stays out of the process for anyone who
         // sets an order once and never opens the menu again
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Named so macOS remembers wherever it is command-dragged to.
+        status.autosaveName = "AeriaLite"
         status.button?.image = App.helmet
         status.button?.target = self
         status.button?.action = #selector(toggle)
+
+        if SMAppService.mainApp.status != .enabled {
+            do { try SMAppService.mainApp.register() }
+            catch {
+                FileHandle.standardError.write(Data(
+                    "aerialite: could not register as a login item: \(error)\n".utf8))
+            }
+        }
     }
+
+
 
     /// The same silhouette the app icon is built from, bundled by scripts/bundle.sh. Marked as a
     /// template so AppKit tints it to whatever the menu bar is doing, which is the only way this
     /// tracks light and dark.
+
     private static let helmet: NSImage? = {
         guard let url = Bundle.main.url(forResource: "MenuIcon", withExtension: "png"),
               let image = NSImage(contentsOf: url) else { return nil }

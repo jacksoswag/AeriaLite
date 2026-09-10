@@ -3,6 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "aerialite",
-    platforms: [.macOS(.v14)],
-    targets: [.executableTarget(name: "aerialite", path: "src/aerialite")]
+    platforms: [.macOS("26.0")],
+    targets: [
+        .executableTarget(name: "aerialite", path: "src/aerialite"),
+        .testTarget(name: "AeriaLiteTests", dependencies: ["aerialite"], path: "tests/unit"),
+    ]
 )

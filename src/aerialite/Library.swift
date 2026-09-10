@@ -15,31 +15,54 @@ enum Library {
         return parts.isEmpty ? stem : parts.joined(separator: " ")
     }
 
-    /// The recorded path is the whole availability test. Nothing is inferred from the folder,
-    /// so a hand-pointed file anywhere on disk works exactly like a downloaded one, and renaming
-    /// an entry cannot break playback because the filename never moves.
+    /// A recorded path is a persistent/downloaded or hand-pointed file. Streamed cache paths are
+    /// deliberately derived from the stable storage key and never written to wallpapers.json, so
+    /// normal eviction cannot leave the catalogue pointing at a file that was meant to disappear.
     static func playable(_ entry: Entry) -> URL? {
-        guard !entry.source.path.isEmpty else { return nil }
-        let url = URL(fileURLWithPath: (entry.source.path as NSString).expandingTildeInPath)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        if let url = recorded(entry), FileManager.default.fileExists(atPath: url.path) { return url }
+        return stored(entry) ?? cached(entry)
     }
 
-    /// A decoded copy left in wallpapers/ by an earlier download. Storage names are fixed when a
-    /// file lands and never track renames, so the slug is the whole lookup.
-    static func stored(_ entry: Entry) -> URL? { variants(entry, in: Paths.wallpapers).first }
+    /// A decoded copy left in Wallpapers by an earlier download. Prefer the exact recorded path;
+    /// the variant scan is for catalogues written before stable storage keys existed.
+    static func stored(_ entry: Entry) -> URL? {
+        downloadedFiles(entry).first
+    }
+
+    static func cached(_ entry: Entry) -> URL? { variants(entry, in: Paths.downloads).first }
 
     /// Files predating the slug carry the display name verbatim, spaces and all, so a download
     /// wrote a hyphenated sibling instead of replacing them. Both spellings count as the same clip.
     static func variants(_ entry: Entry, in folder: URL) -> [URL] {
         let fm = FileManager.default
-        return [slug(for: entry.name), entry.name].map {
-            folder.appendingPathComponent($0).appendingPathExtension("mp4")
-        }.filter { fm.fileExists(atPath: $0.path) }
+        var seen = Set<String>()
+        // Once a title is renamed, only the immutable storage key may identify its files. Looking
+        // under the new display name could otherwise claim or delete a different entry's download.
+        var stems = [entry.storage]
+        if entry.storage == slug(for: entry.name) || entry.storage == entry.name {
+            stems += [slug(for: entry.name), entry.name]
+        }
+        return stems.compactMap { stem in
+            guard !stem.isEmpty, seen.insert(stem).inserted else { return nil }
+            let file = folder.appendingPathComponent(stem).appendingPathExtension("mp4")
+            return fm.fileExists(atPath: file.path) ? file : nil
+        }
+    }
+
+    /// Every persistent spelling of an entry, including a recorded pre-storage-key filename.
+    /// Removing a download must remove all of these or a legacy sibling makes it reappear.
+    static func downloadedFiles(_ entry: Entry) -> [URL] {
+        var files = variants(entry, in: Paths.wallpapers)
+        if let url = recorded(entry), isInside(url, Paths.wallpapers),
+           FileManager.default.fileExists(atPath: url.path),
+           !files.contains(where: { $0.standardizedFileURL == url.standardizedFileURL }) {
+            files.insert(url, at: 0)
+        }
+        return files
     }
 
     static func isDownloaded(_ entry: Entry) -> Bool {
-        guard let url = playable(entry) else { return false }
-        return url.path.hasPrefix(Paths.wallpapers.path)
+        stored(entry) != nil
     }
 
     /// Storage name is fixed when a file lands and never tracks the display name afterwards.
@@ -51,9 +74,19 @@ enum Library {
     /// Only ever removes files AeriaLite put in its own folders; a hand-pointed path is left alone.
     static func delete(_ entry: Entry) {
         guard let url = playable(entry),
-              url.path.hasPrefix(Paths.wallpapers.path) || url.path.hasPrefix(Paths.downloads.path)
+              isInside(url, Paths.wallpapers) || isInside(url, Paths.downloads)
         else { return }
         try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Promotes a streamed master with a metadata-only move. The file is persistent before its
+    /// potentially long conform begins, so quitting or cache trimming midway cannot undo a click
+    /// on Download.
+    static func promote(_ entry: Entry, from cached: URL) -> URL? {
+        Paths.ensure()
+        let target = Paths.wallpapers.appendingPathComponent(entry.storage).appendingPathExtension("mp4")
+        guard land(cached, at: target) else { return nil }
+        return target
     }
 
     /// Transcodes a freshly fetched master down to the configured profile, out of process so a
@@ -63,15 +96,14 @@ enum Library {
     /// `into` is where the decode lands: wallpapers/ promotes the clip to downloaded, downloads/
     /// rewrites it in place and leaves it evictable. Reports the path the decode actually took,
     /// which is the master's own when the encode failed.
+    @discardableResult
     static func conform(_ file: URL, into folder: URL, using profile: Settings.Playback,
-                        done: @escaping (URL?) -> Void) {
+                        done: @escaping (URL?) -> Void) -> Process? {
         let binary = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
-        // outside the scanned folders on purpose: an in-flight temp file dropped into cache/
-        // gets adopted by Migration as a library entry of its own
-        let scratch = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("aerialite-conform-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        let out = scratch.appendingPathComponent(file.lastPathComponent)
+        // Same-volume staging makes the final replacement atomic. Migration ignores this spelling
+        // if the process is killed and the temporary output survives until the next launch.
+        let out = folder.appendingPathComponent(
+            ".\(file.deletingPathExtension().lastPathComponent).aerialite.\(UUID().uuidString).mp4")
         let task = Process()
         task.qualityOfService = .background   // a multi-minute encode must never outrank playback
         task.executableURL = binary
@@ -90,15 +122,16 @@ enum Library {
             let fm = FileManager.default
             let ok = proc.terminationStatus == 0 && fm.fileExists(atPath: out.path)
             var landed = file
-            if ok {
-                try? fm.removeItem(at: file)                 // the master has served its purpose
-                try? fm.removeItem(at: final)                // an older decode of the same clip
-                if (try? fm.moveItem(at: out, to: final)) != nil { landed = final }
+            if ok, land(out, at: final) {
+                landed = final
+                if file.standardizedFileURL != final.standardizedFileURL { try? fm.removeItem(at: file) }
+            } else {
+                try? fm.removeItem(at: out)
             }
-            try? fm.removeItem(at: scratch)
-            DispatchQueue.main.async { done(landed) }        // master kept where it is if the encode failed
+            DispatchQueue.main.async { done(landed) }        // original is intact if encode/replace failed
         }
-        guard (try? task.run()) != nil else { return done(file) }
+        guard (try? task.run()) != nil else { done(file); return nil }
+        return task
     }
 
     /// The undecoded masters only. Decoded downloads sit in wallpapers/ and this never reaches them.
@@ -106,29 +139,8 @@ enum Library {
         let fm = FileManager.default
         guard let found = try? fm.contentsOfDirectory(at: Paths.downloads, includingPropertiesForKeys: nil)
         else { return }
-        for file in found where file.pathExtension.lowercased() == "mp4" {
+        for file in found where isCommittedVideo(file) {
             try? fm.removeItem(at: file)
-        }
-    }
-
-    /// Everywhere macOS caches wallpaper state: Apple's aerial store with its manifest,
-    /// thumbnails and videos, plus the frame caches a still-image wallpaper leaves behind.
-    /// None of it serves anything while AeriaLite owns the desktop, and a frame cached for one clip
-    /// must not outlive it. Runs at launch, on every clip change, and on quit.
-    ///
-    /// com.apple.wallpaper/Store is deliberately spared: it is the picker's index rather than a
-    /// cache, and deleting it every few seconds invites System Settings to misbehave.
-    static func clearAppleWallpaperCaches() {
-        let home = URL(fileURLWithPath: NSHomeDirectory())
-        let targets = [
-            home.appendingPathComponent("Library/Application Support/com.apple.wallpaper/aerials"),
-            home.appendingPathComponent("Library/Caches/com.apple.wallpaper"),
-            home.appendingPathComponent("Library/Caches/com.apple.idleassetsd"),
-            URL(fileURLWithPath: "/Users/Shared/Aerial"),
-        ]
-        let fm = FileManager.default
-        for target in targets where fm.fileExists(atPath: target.path) {
-            try? fm.removeItem(at: target)
         }
     }
 
@@ -136,58 +148,86 @@ enum Library {
     /// and `keep` is whatever is on screen right now.
     /// Two caps, count and bytes. capAtHigh keeps whichever allows more; otherwise the tighter
     /// of the two binds, which is the safer default.
-    static func trimCache(_ cache: Settings.Cache, keeping keep: String?) {
-        clearAppleWallpaperCaches()      // AeriaLite owns the desktop; nothing of Apple's should survive a cache pass
+    static func trimCache(_ cache: Settings.Cache, keeping keep: String?,
+                          in folder: URL = Paths.downloads) {
         let fm = FileManager.default
-        guard let found = try? fm.contentsOfDirectory(at: Paths.downloads,
-                                                      includingPropertiesForKeys: [.contentAccessDateKey])
+        guard let found = try? fm.contentsOfDirectory(at: folder,
+                                                      includingPropertiesForKeys: [
+                                                        .contentAccessDateKey,
+                                                        .contentModificationDateKey,
+                                                      ])
         else { return }
-        var files = found.filter { $0.pathExtension.lowercased() == "mp4" }
-                         .filter { $0.deletingPathExtension().lastPathComponent != keep }
+        // Hidden `.aerialite` files are downloads being validated or encodes still being written.
+        // They are outside the cache budget until atomically committed and must never be evicted.
+        let all = found.filter(isCommittedVideo)
+        var files = all.filter { $0.deletingPathExtension().lastPathComponent != keep }
         files.sort {
-            let a = (try? $0.resourceValues(forKeys: [.contentAccessDateKey]).contentAccessDate) ?? .distantPast
-            let b = (try? $1.resourceValues(forKeys: [.contentAccessDateKey]).contentAccessDate) ?? .distantPast
+            let keys: Set<URLResourceKey> = [.contentAccessDateKey, .contentModificationDateKey]
+            let av = try? $0.resourceValues(forKeys: keys)
+            let bv = try? $1.resourceValues(forKeys: keys)
+            let a = av?.contentAccessDate ?? av?.contentModificationDate ?? .distantPast
+            let b = bv?.contentAccessDate ?? bv?.contentModificationDate ?? .distantPast
             return a < b
         }
-        var total = files.reduce(Int64(0)) { $0 + Paths.size(of: $1) }
-        let slots = max(0, cache.videos - 1)          // the clip being kept occupies one
-        for (index, file) in files.enumerated() {
-            let overCount = files.count - index > slots
+        var total = all.reduce(Int64(0)) { $0 + Paths.size(of: $1) }
+        var remaining = all.count
+        for file in files {
+            let overCount = remaining > max(0, cache.videos)
             let overSpace = total > cache.bytes
             let evict = cache.capAtHigh ? (overCount && overSpace) : (overCount || overSpace)
             guard evict else { break }
-            total -= Paths.size(of: file)
-            try? fm.removeItem(at: file)
+            let size = Paths.size(of: file)
+            do {
+                try fm.removeItem(at: file)
+                total -= size
+                remaining -= 1
+            } catch {
+                continue
+            }
         }
     }
 
-    /// Every master lands in downloads/ regardless of `offline`, reporting fraction complete as it
-    /// goes. What differs afterwards is where conform puts the decode. This is the only place a
-    /// filename is chosen.
+    /// A stream lands in the evictable cache and an explicit download lands directly in the
+    /// destination Wallpapers folder, reporting fraction complete as it goes. This is the only
+    /// place a filename is chosen.
     /// `fallback` is this same clip's downloaded copy, used when the link cannot carry the
     /// stream. It is never another wallpaper: a slow network changes where a clip comes from,
     /// never which clip plays.
     @discardableResult
-    static func fetch(_ entry: Entry, fallback: URL? = nil,
+    static func fetch(_ entry: Entry, into folder: URL = Paths.downloads, fallback: URL? = nil,
+                      session: URLSession = .shared,
                       progress: @escaping (Double) -> Void,
                       done: @escaping (String?) -> Void) -> NSKeyValueObservation? {
         guard !entry.source.link.isEmpty, let remote = URL(string: entry.source.link) else {
             done(fallback?.path); return nil
         }
         Paths.ensure()
-        let folder = Paths.downloads
-        let target = folder.appendingPathComponent(slug(for: entry.name)).appendingPathExtension("mp4")
+        let target = folder.appendingPathComponent(entry.storage).appendingPathExtension("mp4")
         let settled = Settled()
-        let task = URLSession.shared.downloadTask(with: remote) { temp, _, _ in
-            var landed: String?
-            if let temp {
-                // every spelling of this clip, so a download replaces rather than duplicates
-                for old in variants(entry, in: folder) { try? FileManager.default.removeItem(at: old) }
-                try? FileManager.default.removeItem(at: target)
-                if (try? FileManager.default.moveItem(at: temp, to: target)) != nil { landed = target.path }
+        let task = session.downloadTask(with: remote) { temp, response, _ in
+            guard settled.claim() else { return }          // the slow-link fallback already answered
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let staged = folder.appendingPathComponent(
+                ".\(entry.storage).aerialite.fetch.\(UUID().uuidString).mp4")
+            // URLSession owns `temp` only until this callback returns. Claim it synchronously,
+            // then validate from AeriaLite's staging path without risking the existing target.
+            guard let temp, (200..<300).contains(status), land(temp, at: staged) else {
+                return DispatchQueue.main.async { done(fallback?.path) }
             }
-            guard settled.claim() else { return }          // the slow-link bail already answered
-            DispatchQueue.main.async { done(landed ?? fallback?.path) }
+            Task {
+                var landed: String?
+                if await isPlayableVideo(staged), land(staged, at: target) {
+                    landed = target.path
+                    // Remove legacy spellings only after the replacement is safely in place.
+                    for old in variants(entry, in: folder)
+                    where old.standardizedFileURL != target.standardizedFileURL {
+                        try? FileManager.default.removeItem(at: old)
+                    }
+                } else {
+                    try? FileManager.default.removeItem(at: staged)
+                }
+                DispatchQueue.main.async { done(landed ?? fallback?.path) }
+            }
         }
         let began = Date()
         let watch = task.progress.observe(\.fractionCompleted) { p, _ in
@@ -203,6 +243,51 @@ enum Library {
         }
         task.resume()
         return watch
+    }
+
+    private static func recorded(_ entry: Entry) -> URL? {
+        guard !entry.source.path.isEmpty else { return nil }
+        return URL(fileURLWithPath: (entry.source.path as NSString).expandingTildeInPath).standardizedFileURL
+    }
+
+    /// A 200 response can still be an HTML error page or a truncated object. Do not let either
+    /// replace a playable cache/download merely because it is non-empty.
+    static func isPlayableVideo(_ file: URL) async -> Bool {
+        let asset = AVURLAsset(url: file)
+        guard (try? await asset.load(.isPlayable)) == true,
+              let duration = try? await asset.load(.duration),
+              duration.isValid, duration.isNumeric, duration.seconds > 0,
+              let tracks = try? await asset.loadTracks(withMediaType: .video) else { return false }
+        return !tracks.isEmpty
+    }
+
+    static func isInside(_ url: URL, _ folder: URL) -> Bool {
+        let root = folder.standardizedFileURL.path.hasSuffix("/")
+            ? folder.standardizedFileURL.path : folder.standardizedFileURL.path + "/"
+        return url.standardizedFileURL.path.hasPrefix(root)
+    }
+
+    /// Replaces an existing file without first unlinking it. If replacement fails, the old file
+    /// remains usable; this is the durability boundary for both downloads and conform output.
+    static func land(_ source: URL, at target: URL) -> Bool {
+        let fm = FileManager.default
+        guard source.standardizedFileURL != target.standardizedFileURL else { return true }
+        do {
+            if fm.fileExists(atPath: target.path) {
+                _ = try fm.replaceItemAt(target, withItemAt: source)
+            } else {
+                try fm.moveItem(at: source, to: target)
+            }
+            return fm.fileExists(atPath: target.path)
+        } catch {
+            return false
+        }
+    }
+
+    private static func isCommittedVideo(_ file: URL) -> Bool {
+        file.pathExtension.lowercased() == "mp4"
+            && !file.lastPathComponent.hasPrefix(".")
+            && !file.lastPathComponent.contains(".aerialite.")
     }
 }
 

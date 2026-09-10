@@ -1,0 +1,55 @@
+// swift-interface-format-version: 1.0
+// swift-module-flags: -target arm64-apple-macos26.0 -enable-objc-interop -enable-library-evolution -swift-version 5 -module-name WallpaperExtensionKit
+
+// Hand-reconstructed declarations for the macOS 26 private WallpaperExtensionKit module.
+//
+// The framework ships a .tbd in the SDK and a binary in the shared cache, but no .swiftmodule, so
+// there is nothing to import and nothing to conform to. Everything below is transcribed from the
+// shipped binary's protocol descriptors: `dyld_info -exports` gives every symbol with its address,
+// and because a protocol's requirements are laid out contiguously after its requirements-base
+// descriptor, sorting the demangled method descriptors by address recovers the exact requirement
+// order a witness table has to match. Descriptor header size gives the requirement-signature count,
+// which is how `Wallpaper` is known to carry no AnyObject constraint (0 entries) while
+// `WallpaperExtension` carries exactly one, its `AppExtension` inheritance.
+//
+// Only what AeriaLite actually touches is declared. Types it merely passes through are empty:
+// the module is built with library evolution, so every public struct is resilient and travels
+// indirectly, and a witness that never reads one does not need its layout. `WallpaperHostProxy`
+// is likewise empty because AeriaLite never calls the host back; an existential's layout does not
+// depend on how many requirements the protocol has.
+import CoreGraphics
+import ExtensionFoundation
+import Foundation
+import QuartzCore
+import Swift
+import _Concurrency
+
+public struct WallpaperCreationRequest {
+}
+
+public struct WallpaperUpdateRequest {
+}
+
+public struct WallpaperSnapshot {
+  public init(image: CoreGraphics.CGImage) throws
+}
+
+public protocol WallpaperHostProxy {
+}
+
+public protocol Wallpaper {
+  var layer: QuartzCore.CALayer { get }
+  func invalidate()
+  func update(request: WallpaperExtensionKit.WallpaperUpdateRequest) async
+  func snapshot() async throws -> WallpaperExtensionKit.WallpaperSnapshot
+}
+
+public protocol WallpaperExtension : ExtensionFoundation.AppExtension {
+  func makeWallpaper(request: WallpaperExtensionKit.WallpaperCreationRequest, host: any WallpaperExtensionKit.WallpaperHostProxy) async throws -> any WallpaperExtensionKit.Wallpaper
+}
+
+extension WallpaperExtensionKit.WallpaperExtension {
+  public var configuration: some ExtensionFoundation.AppExtensionConfiguration {
+    get
+  }
+}

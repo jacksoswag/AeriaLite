@@ -1,7 +1,8 @@
 import Foundation
 
-/// One row of wallpapers.json. `name` is display only and freely editable; storage lives in
-/// `source.path`, which is also the whole test for whether the clip is available.
+/// One row of wallpapers.json. `name` is display only and freely editable. `id` and `storage`
+/// never change, so an in-flight download, a cached file, and a renamed row keep referring to the
+/// same asset.
 
 /// Where a clip comes from and where its local copy is. Either half may be empty: a catalogue
 /// row has only a link, a hand-added file has only a path.
@@ -18,17 +19,23 @@ struct Source: Codable, Hashable {
 }
 
 /// Every row is always in the catalogue; there is no adding or removing. What varies is whether
-/// it is starred and whether a copy sits in persistent/, and those are what the filter selects on.
+/// it is starred and whether a copy sits in Wallpapers/, and those are what the filter selects on.
 struct Entry: Codable, Identifiable, Hashable {
+    var id: String
+    var storage: String
     var name: String
     var source = Source()
     var favorite = false
     var position: Int = 0
 
-    var id: String { name }
-
-    init(name: String, source: Source = Source(), favorite: Bool = false, position: Int = 0) {
-        self.name = name; self.source = source; self.favorite = favorite; self.position = position
+    init(name: String, source: Source = Source(), favorite: Bool = false, position: Int = 0,
+         id: String? = nil, storage: String? = nil) {
+        self.name = name
+        self.source = source
+        self.favorite = favorite
+        self.position = position
+        self.id = id ?? Entry.identity(for: source, name: name)
+        self.storage = storage ?? Entry.storageName(for: source, name: name)
     }
 
     init(from d: Decoder) throws {
@@ -37,6 +44,30 @@ struct Entry: Codable, Identifiable, Hashable {
         source = try c.decodeIfPresent(Source.self, forKey: .source) ?? Source()
         favorite = try c.decodeIfPresent(Bool.self, forKey: .favorite) ?? false
         position = try c.decodeIfPresent(Int.self, forKey: .position) ?? 0
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? Entry.identity(for: source, name: name)
+        let decodedStorage = try c.decodeIfPresent(String.self, forKey: .storage) ?? ""
+        storage = decodedStorage.isEmpty ? Entry.storageName(for: source, name: name) : decodedStorage
+    }
+
+    private static func identity(for source: Source, name: String) -> String {
+        if !source.link.isEmpty { return source.link }
+        if !source.path.isEmpty {
+            return URL(fileURLWithPath: (source.path as NSString).expandingTildeInPath).standardized.path
+        }
+        return "local:\(name)"
+    }
+
+    private static func storageName(for source: Source, name: String) -> String {
+        if !source.path.isEmpty {
+            return URL(fileURLWithPath: (source.path as NSString).expandingTildeInPath)
+                .deletingPathExtension().lastPathComponent
+        }
+        let named = Library.slug(for: name)
+        if !named.isEmpty { return named }
+        if let linked = URL(string: source.link), !source.link.isEmpty {
+            return linked.deletingPathExtension().lastPathComponent
+        }
+        return "Wallpaper"
     }
 }
 
@@ -82,7 +113,7 @@ struct Catalog: Codable {
     func save() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try? encoder.encode(self).write(to: Paths.catalog)
+        try? encoder.encode(self).write(to: Paths.catalog, options: .atomic)
     }
 
     /// The one order everything reads from. Filtering hides rows without disturbing it, so a
@@ -99,24 +130,24 @@ struct Catalog: Codable {
     }
 
     mutating func replace(_ entry: Entry) {
-        guard let index = entries.firstIndex(where: { $0.name == entry.name }) else { return }
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         entries[index] = entry
     }
 
     /// Renumbers so `position` always matches the visible order rather than drifting after moves.
     mutating func renumber(_ order: [Entry]) {
         for (index, entry) in order.enumerated() {
-            guard let at = entries.firstIndex(where: { $0.name == entry.name }) else { continue }
+            guard let at = entries.firstIndex(where: { $0.id == entry.id }) else { continue }
             entries[at].position = index
         }
     }
 
     mutating func append(_ entry: Entry) {
-        guard !entries.contains(where: { $0.name == entry.name }) else { return }
+        guard !entries.contains(where: { $0.id == entry.id || $0.name == entry.name }) else { return }
         entries.append(entry)
     }
 
-    /// Names are the filename, so collisions have to be resolved on the way in.
+    /// Display names remain unique even though storage and identity no longer depend on them.
     func unique(_ base: String) -> String {
         guard entries.contains(where: { $0.name == base }) else { return base }
         var n = 2

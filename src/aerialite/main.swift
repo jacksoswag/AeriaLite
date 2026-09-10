@@ -11,6 +11,17 @@ let argv = Array(CommandLine.arguments.dropFirst())
 switch argv.first {
 case "prep": Prep.main(Array(argv.dropFirst()))
 case "catalog": CatalogImport.main()
-case "play", nil: MainActor.assumeIsolated { App.run() }   // top-level code already runs on main
+case "activate-native":
+    do {
+        try NativeActivation.activate()
+        print("native wallpaper extension registered and active")
+    } catch {
+        fail("native activation failed: \(error.localizedDescription)")
+    }
+case "play", nil:
+    guard SingleInstance.acquire() else {
+        fail("another aerialite agent is already running and owns the wallpaper")
+    }
+    MainActor.assumeIsolated { App.run() }   // top-level code already runs on main
 case let other: fail("unknown command \(other!)\nusage: aerialite [play] | aerialite prep <input> [flags] | aerialite catalog")
 }

@@ -1,182 +1,177 @@
 # AeriaLite technical spec
 
-A macOS video wallpaper renderer and its companion transcoder, built to hold no decoded frame, to stop decoding in a fullscreen space, and to keep a bounded amount of video on disk. Public AppKit, AVFoundation, SwiftUI and CoreGraphics, plus three private CoreGraphics Services calls for Space membership. No external dependencies at runtime.
-
-It covers the same catalogue as `AerialScreensaver/Aerial` and takes the opposite shape: a wallpaper with its own window and player rather than a screensaver hosted in Apple's App Extension, no overlay surface, and every cost measured in `tests/reports/`.
+AeriaLite is a macOS 26 menu agent plus a native Wallpaper Extension. The app owns catalogue,
+downloads, cache policy, and controls. `WallpaperAgent` owns desktop placement and hosts the
+extension process. No AppKit desktop window or renderer fallback remains.
 
 ## Binary shape
 
-One executable, three commands.
+The app executable supports four commands.
 
 | Command | Does |
 | --- | --- |
-| `aerialite play` (also the no-argument default) | runs the renderer as a foreground-less agent until killed |
-| `aerialite prep <input> [flags]` | transcodes a source clip to a profile and exits |
-| `aerialite catalog` | imports Apple's macOS aerial manifest into `wallpapers.json` |
+| `aerialite play` | runs the menu agent and publishes playback state |
+| `aerialite prep <input> [flags]` | transcodes one source clip |
+| `aerialite catalog` | imports Apple's macOS aerial manifest |
+| `aerialite activate-native` | registers, selects, and health-checks the extension |
 
-`main.swift` dispatches on `argv[1]` and calls `setvbuf(stdout, nil, _IOLBF, 0)` first, because launchd redirects stdout to a file where block buffering hides every line until the process dies.
+`scripts/bundle.sh` also builds `AeriaLiteWallpaperExtension.appex`. It builds with stable Xcode 26,
+targets macOS 26, and requires the macOS 26 SDK. The build script fails explicitly on an unsupported
+SDK, verifies the SDK stamp, entry point, and nested signature, and never
+substitutes the removed window renderer. It gives both bundles a unique timestamp build number so
+PluginKit can distinguish rebuilds.
+
+The extension links with `-e _NSExtensionMain`, as an Xcode app-extension target does. That symbol,
+not the Swift `@main` entry point, performs the ExtensionKit check-in and runs the main run loop
+before handing control to the `AppExtension` type. Entering at the Swift entry point instead
+compiles, signs, registers, and launches identically, and then returns from `main` and exits 0
+before `WallpaperAgent` can hold an assertion on the process, so the desktop simply never changes.
+Because that failure produces no crash, no error, and no log line of its own, `bundle.sh` asserts
+that `LC_MAIN` resolves to the `_NSExtensionMain` stub.
+
+Native installation additionally requires the app and extension to be signed by the same
+Apple-issued team identity. A free Xcode Personal Team can provide an Apple Development identity;
+paid Developer Program membership is not required for personal testing. The installer rejects
+missing or mismatched team identifiers before changing the installed app or wallpaper selection.
+
+## Native framework boundary
+
+macOS 26 hosts wallpapers through `WallpaperExtensionKit`, a private *Swift* framework. Its
+`WallpaperExtension` protocol refines `ExtensionFoundation.AppExtension` with one requirement,
+`makeWallpaper(request:host:)`, and supplies the `AppExtensionConfiguration` itself. That
+configuration is the framework's own type: an extension that vends any other one is not recognised
+at the `com.apple.wallpaper` extension point, whatever XPC protocol it goes on to implement. So the
+boundary is a conformance, not a wire format, and `WallpaperAgent`—not this code—owns the XPC
+contract, the remote `CAContext`, display and Space placement, Mission Control, and the login
+screen. AeriaLite implements `Wallpaper`: a `CALayer` to composite, `update`, `snapshot`, and
+`invalidate`.
+
+The SDK ships `WallpaperExtensionKit.tbd` but no `.swiftmodule`, so there is nothing to import.
+`vendor/WallpaperExtensionKit.swiftinterface` declares the subset AeriaLite uses and is compiled to
+a module at build time; the client then links the SDK stub as usual. Its header records how each
+declaration was recovered from the shipped binary. Two properties of the framework make this safe:
+it is built with library evolution, so resilient types travel indirectly and a passed-through type
+needs a name but not a layout, and a protocol's requirements are laid out in source order after its
+requirements-base descriptor, so their addresses recover the order a witness table must match.
+Getting that order wrong is not a build error—it is a call to the wrong method at runtime—so the
+declarations are transcribed rather than guessed, and `nm -u` on the built extension is the check:
+every `WallpaperExtensionKit` symbol it imports must be one the framework exports.
+
+Aerial's public repository and `v4.1.0beta15` tag do not contain the `Aerial4WallpaperExtension`
+target or its backend source, so this was derived from the shipped framework rather than from it.
+
+The menu agent is a login item, registered by the app itself with `SMAppService` on first run,
+and `install.sh` starts it with `open`.
+
+The command file is process-global, so the agent takes an advisory lock before serving `play`: a
+second agent's `shutdown()` publishes `running: false` and stops the wallpaper the first one is
+driving, and `aerialite` is on PATH with `play` as its default subcommand. The lock is released by
+the kernel on exit, and acquisition waits briefly so that installation's handover is not mistaken
+for a second agent. The agent also republishes whenever the command file's revision is not the one
+it last wrote, since publishing is otherwise driven by state changes and an overwrite leaves the
+extension following stale instructions indefinitely.
+
+`NativeWallpaperSession` owns that layer and puts an aspect-fill `AVPlayerLayer` in it. It polls an
+atomic command snapshot every 200 ms, applies playlist/transport/rate changes, and writes an atomic
+status snapshot. The app regards the backend as live only while that heartbeat is newer than three
+seconds.
+
+`snapshot()` decodes a still separately, through `AVAssetImageGenerator` at the playhead, rather
+than reusing the playing frame. The host asks for it wherever it cannot run the layer—Mission
+Control, the wallpaper grid in System Settings, and the desktop itself while presentation is idle—
+and refusing does not fall back to a capture of the layer. It leaves whatever was on screen before,
+which reads exactly like an extension that never activated.
+
+Activation writes the same selection into both slots of every store section. `Desktop` is the
+wallpaper; `Idle` is what macOS 26 presents once the Mac is left alone, and it defaults to Apple's
+own aerial, so filling only `Desktop` leaves an untouched Mac showing Apple's footage over a
+backend still decoding underneath.
+
+Native activation removes any old heartbeat, restarts `WallpaperAgent`, and requires a live status
+that both postdates that restart and survives a further two seconds. The outgoing agent relaunches
+the extension on demand while tearing down, and that short-lived process publishes a heartbeat
+newer than the store rewrite, so a single sample taken from before the restart passed installation
+on a session that was already dying. A failed check atomically restores the exact pre-activation
+wallpaper store, unregisters the failed bundle, and restarts services on that restored state.
 
 ## Source layout
 
-| File | Holds |
+| Path | Holds |
 | --- | --- |
-| `main.swift` | argument dispatch |
-| `App.swift` | `NSApplicationDelegate`, status item, popover, menu bar glyph |
-| `AppState.swift` | owns catalogue, settings and walls; fetch, prefetch, conform queue |
-| `Wall.swift` | one screen's window, player and visibility gate |
-| `Player.swift` | passthrough playlist playback |
-| `Clip.swift` | one file parsed once; keyframe-grid measurement |
-| `DesktopWindow.swift` | the borderless window and its level |
-| `Spaces.swift` | private CGS calls placing the window on every ordinary Space |
-| `Coverage.swift` | whether our own window is on screen |
-| `AppleWallpaper.swift` | culls macOS's own wallpaper agent at launch, restores it on quit |
-| `Catalog.swift` | `wallpapers.json` model, ordering, filtering |
-| `Settings.swift` | `config.json` model, resolution presets |
-| `Library.swift` | path resolution, fetch, conform, cache eviction |
-| `Migration.swift` | disk reconciliation at launch; `CatalogImport` |
-| `Prep.swift` | the transcoder |
-| `Paths.swift` | every disk location; the one-shot move off the old root |
-| `ControlPanel.swift` | the SwiftUI panel |
+| `src/aerialite/App.swift` | menu agent, popover, signal-safe shutdown |
+| `src/aerialite/AppState.swift` | catalogue, transfers, conform queue, IPC commands |
+| `src/aerialite/NativeActivation.swift` | registration, wallpaper selection, health check |
+| `src/aerialite/NativeIPC.swift` | command/status wire format and atomic files |
+| `src/aerialite/SingleInstance.swift` | advisory lock keeping one agent on the command file |
+| `src/wallpaper-extension/main.swift` | `WallpaperExtension` conformance and video sessions |
+| `vendor/WallpaperExtensionKit.swiftinterface` | reconstructed declarations for the private framework |
+| `src/aerialite/Library.swift` | resolution, fetch, promotion, conform, eviction |
+| `src/aerialite/Migration.swift` | interrupted-work cleanup and storage reconciliation |
+| `src/aerialite/CatalogNames.swift` | stable shot-id-to-title curation |
+| `src/aerialite/Prep.swift` | HEVC transcoder |
 
-## Playback
+## Download lifecycle
 
-`Player` feeds an `AVSampleBufferDisplayLayer` driven by an `AVSampleBufferRenderSynchronizer`. `AVAssetReaderTrackOutput` is created with `outputSettings: nil`, so what crosses the process is compressed samples of a few tens of KB. Decode happens inside the layer's own VideoToolbox session against IOSurfaces the compositor already owns. No display link is involved.
+`Wallpapers/` is durable; `Cache/` is evictable. This directory boundary—not a transient catalogue
+path—is the download state.
 
-Two values carry the timeline. `offset` is the synchroniser time at which the current reader's first sample is shown; `clipStart` is how far into the clip that reader began. Position inside the clip is `clipStart + (now - offset)`, which survives seeking.
+A streamed fetch stages its `URLSession` temporary file inside `Cache/`. A Download action either
+moves that cache file into `Wallpapers/` or downloads directly there. In both cases the durable
+file exists before transcoding begins. The transcoder writes a hidden sibling and atomically
+replaces the source only after a successful exit. A crash therefore leaves either the original or
+the complete replacement, never a half-written target. Launch removes abandoned hidden siblings.
 
-The reader runs ahead of the picture, so a clip is opened seconds before the compositor reaches it. `Player` records one `Segment` per clip and picks by the synchroniser's clock, which keeps the readout describing what is on screen rather than what has merely been read.
+HTTP status alone is insufficient: a staged response must be an AVFoundation-playable asset with
+at least one video track before it can replace an existing file. Display name, immutable entry ID,
+and immutable storage key are separate, so renaming during a transfer cannot orphan its result.
 
-Everything mutable belongs to the `feed` queue at `.userInitiated`. That QoS is load-bearing: at a background priority the queue is descheduled under contention and late samples read as stutter.
+Cache eviction counts both the protected current file and every candidate against byte and count
+limits. It removes only `.mp4` files inside `Cache/`, oldest access/modification date first, and
+updates accounting only after deletion succeeds. Hidden fetch/encode staging files are excluded
+until committed, so eviction cannot race a transfer. It cannot reach `Wallpapers/` or hand-selected
+files outside AeriaLite's root.
 
-`setPlaylist` edits the queue in place. A clip still in the new list keeps playing at its own position, so reordering, renaming, favouriting and filtering never cut the picture. A clip that left the list plays out with the cursor at `-1`, and the new list governs only what follows.
+## Migration and storage
 
-Seeks snap to the keyframe grid. A passthrough reader cannot begin mid-GOP, and `AVAssetReader.timeRange` falls back to the preceding sync sample, so landing anywhere else puts the picture up to a GOP behind the readout. The grid is measured off the file rather than computed from config, because VideoToolbox treats `keyframeSeconds` as a ceiling and lands under it: asked for 1.0s it emits 0.9675s. Measurement runs on a background queue *after* the picture is up, since scanning for two sync samples in a 4K/240 master reads roughly 1,200 samples.
-
-## The gate
-
-`Coverage.isVisible` reads `kCGWindowIsOnscreen` for AeriaLite's own window. Two earlier approaches failed and should not be retried: `NSWindow.occlusionState` reports raw 8192 with `.visible` never set below normal window level and emits no change notification; and scanning for a layer-0 window whose bounds contain `CGDisplayBounds` never matches, because a real fullscreen window measures (0, 33, 1470, 923) against display bounds of (0, 0, 1470, 956).
-
-The query is a synchronous IPC into WindowServer, which is also the process compositing the video, so it runs off the main thread and hops back with the boolean.
-
-Gating is asymmetric. Becoming visible applies at once; becoming hidden waits 0.75s behind a generation counter, because a window animating to full size reports not-covering for a beat. A space change is chased at 60ms for 1.8s, since the notification arrives before window coordinates settle.
-
-`playWhileFullscreen` selects 0 stop, 1 pause, 2 ignore. Pause keeps the decoder's last frame, the queue position and the play head.
-
-## Spaces
-
-`collectionBehavior` is `[.ignoresCycle]` and nothing more. Space membership comes from `CGSAddWindowsToSpaces`, given every Space of `type == 0` from `CGSCopyManagedDisplaySpaces`; fullscreen Spaces are excluded so the wallpaper never covers a fullscreen app.
-
-Any `collectionBehavior` flag that also claims a Space drags the active one while a transition resolves. `.fullScreenNone` took a fullscreen cycle from 4 space changes to 11. `.stationary` threw the desktop rightward on an adjacent swipe, because an adjacent swipe renders both Spaces at once and a window required on both while forbidden to move has no valid position.
-
-Registration happens at window creation and again after every `orderFront`, never on a space change. Ordering out drops the registration, so a window brought back without re-registering belongs to no Space and never shows. Re-registering *during* a transition drags the active Space, which is the same failure as the flags.
-
-## Apple's wallpaper agent
-
-`AppState.init` takes `com.apple.wallpaper.agent` out of the login domain before the cache pass, since a live agent rewrites what was just deleted. Its window sits under AeriaLite's, so a configured aerial holds a second decoder open behind a picture nobody can see.
-
-Killing the processes does nothing on its own: launchd has the agent back inside two seconds. `launchctl bootout gui/<uid>/com.apple.wallpaper.agent` is what makes it stay dead for the session. The ExtensionKit extensions are separate processes that outlive the agent, so a `pkill -u <uid> -f` on `WallpaperAgent|WallpaperAerialsExtension` follows it, catching both those and the plugin processes running out of `WallpaperAgent.app`. `wallpaperexportd` is root-owned and left alone, and `idleassetsd` downloads assets rather than drawing them, so neither is touched.
-
-Quitting bootstraps the job back and kickstarts it, because bootstrap alone registers an on-demand job that draws nothing. That path exists only because `App` puts a `DispatchSourceSignal` on SIGTERM: AppKit leaves the default action in place, so launchd stopping the agent would skip `applicationWillTerminate` entirely and leave the desktop with no wallpaper of either kind.
-
-The menu bar's auto-reveal strip tints from the desktop picture rather than from what is on screen, so culling the agent removes any chance of that band ever matching the video.
-
-## Threading
-
-The main actor owns `AppState`, the catalogue and the panel. `Player` owns the `feed` queue. Cache eviction, the keyframe scan and the coverage query all run on background queues, because each does synchronous filesystem or IPC work that shows as dropped frames from the main thread.
-
-## Transcoding
-
-`Prep` reads with a decoding `AVAssetReaderTrackOutput` and writes HEVC Main10 through `AVAssetWriter`, which selects VideoToolbox hardware encode on Apple silicon. No audio track is added.
-
-| Flag | Default | Does |
-| --- | --- | --- |
-| `-o <path>` | `persistent/<input stem>.mp4` | where the encode is written |
-| `--keep <0-1>` | profile `framesKept` | fraction of the source's frames to keep |
-| `--size <WxH>` | profile `resolution`, resolved | output dimensions, forced even |
-| `--bitrate <bps>` | profile `bitrate` | average target; 0 or absent matches the source's bits per pixel |
-| `--keyframe <s>` | profile `keyframeSeconds` | ceiling on the gap between sync samples |
-| `--max-seconds <n>` | profile `maxSeconds` | trim at the reader; 0 keeps the whole clip |
-
-Flags override the profile they default from, which is `downloads` when `prep` is run by hand and whichever profile the fetch used when the agent shells out.
-
-`--keep` is a fraction of the source's own rate, resolved against the clip rather than an assumed number, so a 240 master and a 30 one both mean what the flag says. At or above the source rate every frame is kept and carries its original timestamp: no uniform grid is imposed, because `minFrameDuration` is the tightest gap rather than the average, and grid-stamping one 29.97 master at its 39.2ms minimum squeezed 60s into 46s. Below it, samples are selected against a step of `240000 / fps` ticks, a timescale that divides 239.76 and every halving of it exactly.
-
-Both keyframe caps are set, `AVVideoMaxKeyFrameIntervalKey` and `AVVideoMaxKeyFrameIntervalDurationKey`, so the sync grid holds in seconds even where the cadence clamps.
-
-Trimming happens at the reader's `timeRange` rather than after, so nothing past `maxSeconds` is ever encoded. A `maxSeconds` of 0 keeps the whole clip.
-
-`Library.conform` shells out to `aerialite prep` rather than calling it in-process, because a failure in the encoder cannot then take the agent with it. The subprocess runs at `.background` quality of service. Conforms are strictly serialised through one queue: three concurrent hardware encodes contend for the same media engine and the contention is visible in playback.
-
-### Measured cost
-
-Against a 137s Apple master, 32,865 frames at 239.76, encoded to 2940x1912:
-
-| `framesKept` | Output rate | Frames | Wall | vs realtime |
-| --- | --- | --- | --- | --- |
-| 1.0 | 239.76 | 32,865 | 305s | 2.23x |
-| 0.5 | 119.88 | 16,433 | 210s | 1.53x |
-| 0.25 | 59.94 | 8,217 | 106s | 0.77x |
-
-Decode is the floor at roughly 116s: every source frame must be decoded even when it is about to be discarded. Encode throughput is about 78 frames/sec at that size, and cost is linear in output pixels, not source pixels. The scaler is free, measured at 1.4% over feeding it native directly.
-
-Storage is bitrate times duration and nothing else. Halving the framerate shrank a file 8%, not 50%, because the bitrate target bound first; with a cap set, resolution stops affecting size at all.
-
-## Fetch and cache
-
-A fetch lands Apple's master, writes it into the catalogue and pushes it into the playlist immediately, then conforms behind the picture. `conform` rewrites the same path and every clip is re-read from disk when it comes round, so the encoded version swaps in at a loop or track change rather than cutting into what is on screen. Forcing the swap mid-clip was built and removed: it flushed the sample queue and rewound up to a GOP.
-
-`streamMode` selects the source. 0 plays only what is on disk and greys the rest; 1 prefers `persistent/` and fetches what is missing; 2 streams everything, falling back to that same clip's downloaded copy when observed throughput drops under 5 Mbps after the first two seconds. The fallback is always the same wallpaper: a slow link changes where a clip comes from, never which clip plays.
-
-`Player.onClipChange` fires the moment a reader opens a new clip, which drives prefetch and eviction off the transition itself rather than a poll. The reader runs ahead of the picture, so the callback carries the opened id: reading `status.id` there would still report the previous clip.
-
-`trimCache` evicts least-recently-used files from the streamed half only, never `persistent/`, and never the file passed as `keep`. That argument is a stem, not a filename. It also clears Apple's own wallpaper caches, since nothing there serves anything while AeriaLite owns the desktop.
-
-Downloads and streams are stored by slug, but files predating the slug carry the display name verbatim; both spellings resolve to the same clip so a download replaces rather than duplicates.
-
-## Native resolution
-
-The encode targets the framebuffer the compositor scans out, which on a scaled Retina display is neither the point size nor the panel size: `frame * backingScaleFactor` gives 2940x1912 where the panel is 2560x1664 and points are 1470x956. Against Apple's 3840x2160 masters that keeps 68% of each frame rather than the 51% the panel would.
-
-Sides are forced even, because 4:2:0 chroma requires it.
-
-## Storage
-
-The library lives under `~/Library/Application Support/AeriaLite/`, and the transient half sits in `~/Library/Caches/AeriaLite/`.
+All shared state is under `/Users/Shared/AeriaLite/` so the sandboxed extension and menu app see the
+same files.
 
 | Path | Holds |
 | --- | --- |
-| `config.json` | hand-edited settings, never written by the panel |
-| `wallpapers.json` | the catalogue and the view it was left on, fully owned by the panel |
-| `Wallpapers/` | decoded downloads, never evicted |
-| `Caches/AeriaLite/` | every fetched master, streamed or offline alike |
+| `config.json` | hand-edited settings |
+| `wallpapers.json` | catalogue, names, order, favorites, remembered filter |
+| `Wallpapers/` | durable downloaded/conformed videos; never evicted |
+| `Cache/` | streamed and prefetched videos; bounded and evictable |
+| `Backups/` | five newest pre-activation wallpaper Index backups |
+| `playback-command.json` | app-to-extension snapshot |
+| `playback-status.json` | extension-to-app snapshot and heartbeat |
 
-Every master lands in the cache regardless of how it was asked for, and what happens next is the only difference between a download and a stream: a download is decoded into `Wallpapers/` and its master deleted, while a streamed clip is decoded in place and stays evictable. Living in `Wallpapers/` is therefore the whole of what makes a clip read as downloaded, so `Entry` records nothing about it and `Library.isDownloaded` is a path prefix test. The cache being a standard `Library/Caches` location is what keeps it out of Time Machine.
+Startup recursively merges the previous Application Support and cache roots without overwriting
+an existing destination file. A cross-volume move copies first, verifies the byte count, and only
+then removes the source. A collision leaves the older source available for manual recovery.
+Legacy `Wallpapers/persistent/` downloads are flattened atomically, and catalogue paths into old
+evictable caches are forgotten while durable or hand-selected paths remain.
 
-The whole root is bounded. Downloads land conformed at 1080p under a 2.5 Mbps cap and trimmed at 180 seconds, which measures 47 MB a clip against Apple's 145 MB masters, and the cache is evicted least-recently-used against `maxCache`. A 15-clip library measured 711 MB; the same 15 masters would be 2.2 GB and the full 152-clip catalogue about 22 GB.
+## Transcoding
 
-`Migration.flatten` empties the `Wallpapers/persistent/` subfolder that downloads used to sit in, moving its files up into `Wallpapers/` and repointing the rows that addressed them. One-shot, and it can go once no install predates the change.
+`Prep` uses `AVAssetReader` and `AVAssetWriter` with VideoToolbox HEVC. `framesKept` is a fraction of
+the source cadence, `maxSeconds` trims at the reader, and output dimensions are even for 4:2:0.
+Conforms run one at a time in background subprocesses so an encoder failure cannot take down the
+menu agent or native wallpaper session.
 
-The filter is restored at launch from `wallpapers.json`, and `defaultView` in `config.json` overrides it when set, naming one filter or an array of them and matched case-insensitively. It overrides without recording, so removing the key returns to the remembered view. `AppState.select` is the only writer: persisting from the `filters` observer instead also catches the launch assignment, because a property with a default is already initialised by the time `init` runs, and `defaultView` would overwrite the view it stands in for.
+## Catalogue names
 
-`Catalog` decodes field by field for the same reason `Entry` and `Settings` do. The synthesised initialiser treats a defaulted property as a required key, so a `wallpapers.json` written before `view` existed would fail to parse and take the whole library with it.
+Apple repeats accessibility labels and sometimes leaves them blank. `CatalogNames` keys curated
+titles by stable shot ID. Titles are two to four words and omit filler articles/conjunctions where
+possible. Re-import improves display names without changing favorites, order, storage names, or
+download paths.
 
-A malformed `config.json` falls back to defaults rather than being rewritten over the top of someone's work. `Entry.source.path` is the whole availability test: nothing is inferred from a folder, so a hand-pointed file anywhere works exactly like a downloaded one, and renaming an entry cannot break playback because the filename never moves.
+## Verification
 
-## Catalogue
-
-`aerialite catalog` reads Apple's macOS aerial manifest, which carries 152 assets with exactly one URL key each, `url-4K-SDR-240FPS`. It lives on a content-addressed `itunes-assets` path that is not guessable from the tvOS URL shape; `resources-17` through `resources-20` do not exist. The tvOS manifests under `sylvan.apple.com/Aerials/` are a separate catalogue at 29.97fps with five URL keys, and no 1080p 240fps variant exists in any of them.
-
-Apple ships several clips per place, so bare labels collide; the import numbers them in shot order.
-
-## Build
-
-```bash
-swift build -c release -Xswiftc -gnone
-```
-
-`-gnone` is required: this toolchain has no `dsymutil`, and a release build without it fails at the debug-symbol step.
-
-```bash
-./tests/run-tests.sh --smk    # encodes a generated clip, checks the output profile
-./tests/run-tests.sh --perf   # plays it and samples the renderer's cost
-```
+`swift test` covers invalid-video rejection, atomic replacement, interrupted nested migration,
+stable identity across rename/JSON round trips, cache byte/count behavior, and title constraints.
+`tests/run-tests.sh --smk` creates a deterministic H.264 fixture with AVFoundation, transcodes it,
+and independently verifies the HEVC tag, dimensions, cadence, frame count, and absence of audio.
+It has no Homebrew, `ffmpeg`, or `ffprobe` dependency and returns nonzero on any failed assertion.
+`--perf` requires an installed, active native extension and samples the menu and extension
+processes separately.

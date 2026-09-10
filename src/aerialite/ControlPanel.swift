@@ -163,6 +163,12 @@ struct ControlPanel: View {
     private var header: some View {
         HStack(spacing: 2) {
             Text("AeriaLite").font(.system(size: 13, weight: .semibold))
+            if !state.nativeBackendLive {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .help("Native wallpaper extension is not responding")
+            }
             Spacer()
             Menu {
                 ForEach(Filter.allCases) { option in
@@ -208,13 +214,13 @@ struct ControlPanel: View {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { position, entry in
                     Row(entry: entry,
                         index: position,
-                        playing: entry.name == state.status.id,
+                        playing: state.isPlaying(entry),
                         downloaded: Library.isDownloaded(entry),
                         playable: Library.playable(entry) != nil,
                         canStream: state.canStream,
                         hasSource: !entry.source.link.isEmpty,
-                        progress: state.progress[entry.name],
-                        encoding: state.encoding.contains(entry.name),
+                        progress: state.progress[entry.id],
+                        encoding: state.encoding.contains(entry.id),
                         onPlay: { state.play(entry) },
                         onFavorite: { state.toggleFavorite(entry) },
                         onDownload: { state.toggleDownload(entry) },
@@ -310,11 +316,19 @@ struct ControlPanel: View {
             HStack {
                 Text("Speed").font(.system(size: 12))
                 Spacer()
-                Text(String(format: state.speed < 1 ? "%.2fx" : "%.2gx", state.speed))
+                Text(speedLabel)
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
             }
-            Slider(value: $state.speed, in: 0.25...5, step: 0.25)
+            Slider(value: $state.speed, in: 0.125...5, step: 0.125)
         }
         .disabled(!state.running)
+    }
+
+    private var speedLabel: String {
+        var value = String(format: "%.2f", state.speed)
+        while value.last == "0" { value.removeLast() }
+        if value.last == "." { value.removeLast() }
+        if value.first == "0" { value.removeFirst() }
+        return value + "x"
     }
 }
