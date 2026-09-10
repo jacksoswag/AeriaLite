@@ -94,6 +94,44 @@ newer than the store rewrite, so a single sample taken from before the restart p
 on a session that was already dying. A failed check atomically restores the exact pre-activation
 wallpaper store, unregisters the failed bundle, and restarts services on that restored state.
 
+## Menu bar item
+
+On macOS 26 an `NSStatusItem` is not a window this process owns. AppKit requests an `FBSScene` from
+`com.apple.controlcenter.statusitems` and exports the button into it, so the item is hosted inside
+ControlCenter and appears in `CGWindowListCopyWindowInfo` as a level-25 window belonging to *that*
+process. `button.window` in this process is a detached host that never reports menu bar coordinates.
+
+Two consequences shaped `App.swift`, and both cost real time to find because neither surfaces an
+error to the app.
+
+**The item is created once and never rebuilt.** Any liveness check written against the local
+window's frame reads as "not in the menu bar" on every sample, because that window is never placed.
+Rebuilding on that signal discards an item ControlCenter has already accepted, and
+`removeStatusItem` sends `NSStatusItemClearAutosaveStateAction`, so the saved slot is erased on each
+pass. A two-second retry loop written this way produced an endless accept/invalidate cycle,
+visible only as paired `hosting scene` / `setting scene invalid` lines exactly 2.000s apart, and left
+`NSStatusItem Preferred Position` unwritten while every other menu bar app on the machine had one.
+
+**Placement is a permission, and it is attributed to whoever launched the app.** ControlCenter groups
+each item under the application responsible for the process that created it, persists that grouping
+by bundle id in `trackedApplications` in the `group.com.apple.controlcenter` domain, and refuses to
+place items belonging to a group whose `isAllowed` is false. An app first launched by a CLI tool is
+therefore filed under that tool permanently: the block survives relaunches by any other parent,
+ControlCenter restarts, reinstalls, and reboots. `install.sh` does not launch the app for this
+reason, and `scripts/detach-menu-bar-group.py` repairs an installation already grouped this way.
+
+Neither condition is reported to the app, which sees a live status item with a valid image and a
+non-zero button size throughout. The single diagnostic is one debug line from ControlCenter, emitted
+*after* it has already logged accepting and hosting the scene:
+
+```
+[com.apple.controlcenter:appStatusItems] Moving host to blocked list; (bid:<id>-<autosaveName>-<pid>)
+```
+
+Diagnosing anything here means reading that subsystem at debug level. Window geometry is a proxy and
+misleads: revealing an auto-hidden menu bar to measure it restarts Dock, which changes the thing
+being measured.
+
 ## Source layout
 
 | Path | Holds |

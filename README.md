@@ -53,7 +53,9 @@ git clone https://github.com/jacksoswag/AeriaLite.git
 cd AeriaLite && ./scripts/install.sh
 ```
 
-Builds release, bundles `aerialite.app` into `~/Applications`, symlinks `aerialite` onto your PATH, and starts it. The app adds itself to Login Items on first run, so the wallpaper is up before you are; remove it there to stop that. Set `APPS` or `BIN_DIR` to put either somewhere else.
+Builds release, bundles `aerialite.app` into `~/Applications` and symlinks `aerialite` onto your PATH. It deliberately does not launch the app: open AeriaLite from Finder or Spotlight once, and it adds itself to Login Items so the wallpaper is up before you are. Remove it there to stop that. Set `APPS` or `BIN_DIR` to put either somewhere else.
+
+That first launch has to come from you rather than from the installer. macOS 26 files a menu bar item under whichever application is *responsible* for the process that created it, and an installer run from a terminal makes the terminal responsible. See [below](#if-the-menu-bar-icon-does-not-appear).
 
 Installing selects AeriaLite for both the desktop and the idle screen macOS shows once the Mac is left alone; the latter otherwise stays on Apple's aerial and covers AeriaLite whenever you step away. System Settings > Wallpaper puts either back.
 
@@ -142,10 +144,40 @@ src/wallpaper-extension/  native WallpaperAgent backend
 vendor/              reconstructed WallpaperExtensionKit interface
 scripts/             install.sh, bundle.sh, fetch-aerials.sh, trim.sh, to-av1.sh
 tests/               run-tests.sh --smk --perf, reports/
+scripts/detach-menu-bar-group.py  repairs a menu bar item grouped under another app
 technical-spec.md    native protocol, playback, downloads and storage
 ```
 
 [`technical-spec.md`](technical-spec.md) carries the native protocol boundary, atomic download lifecycle, migration rules, and transcoder details.
+
+## If the menu bar icon does not appear
+
+The wallpaper plays but there is no helmet in the menu bar, and nothing is logged by the app.
+
+macOS 26 does not give a status item a window in its own process. AppKit requests a scene from
+`com.apple.controlcenter.statusitems` and exports the button into it, so Control Center owns
+placement — and Control Center groups each item under the application *responsible* for the process
+that created it. That grouping is persistent, keyed by bundle id, and stored as `trackedApplications`
+in the `group.com.apple.controlcenter` domain. If AeriaLite was first launched by a tool that is not
+allowed to add menu bar items, it is filed under that tool and blocked on every later launch, no
+matter who starts it afterwards, across reboots and reinstalls.
+
+The only symptom is one debug line, logged *after* Control Center has already reported accepting and
+hosting the item:
+
+```bash
+log stream --level debug --predicate 'subsystem == "com.apple.controlcenter"'
+# ... Moving host to blocked list; (bid:com.jacksonadams.aerialite-AeriaLite-<pid>)
+```
+
+To repair an installation already grouped this way:
+
+```bash
+python3 scripts/detach-menu-bar-group.py
+```
+
+It removes only AeriaLite from that group, grants nothing, leaves the other application's own
+setting untouched, backs the file up first, and restarts Control Center. Then open AeriaLite again.
 
 ## Credits
 
