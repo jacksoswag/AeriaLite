@@ -83,11 +83,16 @@ ROLLBACK=0
 rm -rf "$KEEP_DIR"
 ln -sf "$APP/Contents/MacOS/aerialite" "$BIN_DIR/aerialite"
 
-# Started through LaunchServices, and the app adds itself to Login Items on first run, which is
-# the documented way to bring a menu bar app back at login.
+# Deliberately not launched from here. macOS 26 files a menu bar item under the app that is
+# responsible for the process that created it, and that grouping is persistent and per-bundle-id.
+# An installer run from a terminal or an agent therefore welds the menu bar item to *that* tool's
+# entry in group.com.apple.controlcenter's trackedApplications, and if the tool is not allowed to
+# add menu bar items the icon is blocked forever after, on every later launch, no matter who starts
+# it. ControlCenter reports this only as "Moving host to blocked list" at debug level. Launching
+# from Finder, Spotlight or the login item keeps the item under AeriaLite's own entry.
 rm -f "$PLIST"
-open -a "$APP"
 count=$(find "/Users/Shared/AeriaLite/Wallpapers" -name '*.mp4' 2>/dev/null | wc -l | tr -d ' ')
-echo "$APP installed and running, $count wallpapers, log at $CONF_DIR/aerialite.log"
+echo "$APP installed, $count wallpapers, log at $CONF_DIR/aerialite.log"
+echo "open AeriaLite from Finder or Spotlight to start it; it registers itself as a login item"
 [ "$count" = "0" ] && echo "nothing to play yet: scripts/fetch-aerials.sh, or aerialite prep <file>"
 exit 0
