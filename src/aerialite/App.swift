@@ -1,10 +1,11 @@
 import AppKit
+import Darwin
 import ServiceManagement
 import SwiftUI
 
 /// Menu bar agent. No dock icon, no windows of its own beyond the popover, so the only thing
 /// resident between interactions is the playback path.
-@MainActor final class App: NSObject, NSApplicationDelegate {
+@MainActor final class App: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private static var keep: App?
     private var status: NSStatusItem!
     private let popover = NSPopover()
@@ -37,6 +38,7 @@ import SwiftUI
         sigterm?.resume()
 
         popover.behavior = .transient
+        popover.delegate = self
         popover.setValue(true, forKey: "shouldHideAnchor")   // drops the arrow pointing at the status item
         // the panel is built on first open, so SwiftUI stays out of the process for anyone who
         // sets an order once and never opens the menu again
@@ -88,6 +90,7 @@ import SwiftUI
         }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+        state.panelIsVisible = true
         watchForOutsideClick()
     }
 
@@ -105,5 +108,23 @@ import SwiftUI
         if let outside { NSEvent.removeMonitor(outside) }
         outside = nil
         popover.performClose(nil)
+    }
+
+    /// Releasing the hosting controller on close is what keeps a closed panel free. SwiftUI keeps
+    /// the view tree subscribed to every @Published on AppState for as long as the controller
+    /// exists, so a retained one re-evaluates ControlPanel's body on each tick of the 0.25s ticker
+    /// -- forever, for a panel nobody is looking at -- and holds its CoreAnimation layers, raster
+    /// buffers and IOSurfaces resident behind it. Rebuilding costs one frame on the next open,
+    /// which is the same cost already paid for the first one.
+    func popoverDidClose(_ note: Notification) {
+        state.panelIsVisible = false
+        popover.contentViewController = nil
+        // Releasing the tree returns the objects but not the pages. Building the panel takes this
+        // process to a 86.5 MB peak against 7.8 MB of live allocations once it is closed again, and
+        // the small zone holds the difference as dirty free pages rather than handing it back, so
+        // the footprint stays near its peak for a panel that no longer exists. Asking the zones to
+        // release costs a few milliseconds on a path the user has just finished interacting with.
+        // Deferred one turn because the view tree is released through the autorelease pool.
+        DispatchQueue.main.async { malloc_zone_pressure_relief(nil, 0) }
     }
 }

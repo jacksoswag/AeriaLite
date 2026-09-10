@@ -17,6 +17,23 @@ import Combine
 
     private(set) var settings = Settings()
     private var ticker: Timer?
+    /// Set by the menu app as the panel opens and closes.
+    ///
+    /// Only the position slider needs a fast tick. With the panel down the tick has two jobs left,
+    /// and neither is latency-sensitive: notice the extension moved to another clip, so the next
+    /// ones can be prefetched and the cache trimmed, and reassert a command file something else
+    /// overwrote. A clip runs 90 to 300 seconds and download progress arrives by KVO rather than
+    /// from here, so five seconds is far inside what either needs.
+    ///
+    /// Watching the file instead of polling it would be worse, not better. The extension republishes
+    /// its status on its own 200ms cadence, so a vnode source would wake this process four to five
+    /// times a second rather than once every five, and would need re-arming after every write
+    /// because the status file is replaced by atomic rename and the watched descriptor follows the
+    /// old inode. The tick is a rate limiter over a continuously-written file, not a poll for a
+    /// change that might never come, which is why it is a timer and why slowing it down is free.
+    var panelIsVisible = false {
+        didSet { if panelIsVisible != oldValue { startTicker() } }
+    }
     private var watches: [String: NSKeyValueObservation] = [:]
     private var wanted: String?
     private var lastPlaying = ""
@@ -45,10 +62,18 @@ import Combine
         catalog.save()
         pushPlaylist()
 
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+        startTicker()
+    }
+
+    private func startTicker() {
+        ticker?.invalidate()
+        let interval = panelIsVisible ? 0.25 : 5.0
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        timer.tolerance = 0.05
+        // A wide tolerance lets the kernel coalesce this with whatever else is waking, which is
+        // most of the point of slowing it down in the first place.
+        timer.tolerance = interval * 0.2
         RunLoop.main.add(timer, forMode: .common)
         ticker = timer
     }
@@ -191,7 +216,7 @@ import Combine
             if status.isLive { status = NativeIPC.Status() }
             return
         }
-        status = next
+        if next != status { status = next }
         if next.actionRevision == actionRevision, lastAction != nil {
             lastAction = nil
             publish()
