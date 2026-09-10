@@ -109,8 +109,13 @@ window's frame reads as "not in the menu bar" on every sample, because that wind
 Rebuilding on that signal discards an item ControlCenter has already accepted, and
 `removeStatusItem` sends `NSStatusItemClearAutosaveStateAction`, so the saved slot is erased on each
 pass. A two-second retry loop written this way produced an endless accept/invalidate cycle,
-visible only as paired `hosting scene` / `setting scene invalid` lines exactly 2.000s apart, and left
-`NSStatusItem Preferred Position` unwritten while every other menu bar app on the machine had one.
+visible only as paired `hosting scene` / `setting scene invalid` lines exactly 2.000s apart.
+
+Whether an item is really placed is answered by the window list, filtered to ControlCenter rather
+than to this process: a placed item appears as a level-25 window owned by ControlCenter and named
+after its `autosaveName`. `NSStatusItem Preferred Position` does **not** answer it — that key is
+written when an item is dragged to a chosen slot, and apps that have never been dragged are placed
+and visible without one.
 
 **Placement is a permission, and it is attributed to whoever launched the app.** ControlCenter groups
 each item under the application responsible for the process that created it, persists that grouping
