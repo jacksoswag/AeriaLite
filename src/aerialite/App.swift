@@ -57,6 +57,21 @@ import SwiftUI
         status.button?.target = self
         status.button?.action = #selector(toggle)
 
+        // A backend that is hosted but not presenting cannot be fixed by publishing at it, so give
+        // WallpaperAgent a few seconds to acquire on its own and only then restart it. The delay
+        // matters: on an ordinary login the extension is acquired within a second or two and this
+        // never fires.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            guard let self, !self.state.nativeBackendLive else { return }
+            DispatchQueue.global(qos: .utility).async {
+                let recovered = NativeActivation.reacquire()
+                if !recovered {
+                    FileHandle.standardError.write(Data(
+                        "aerialite: the wallpaper backend did not come back; run aerialite activate-native\n".utf8))
+                }
+            }
+        }
+
         if SMAppService.mainApp.status != .enabled {
             do { try SMAppService.mainApp.register() }
             catch {

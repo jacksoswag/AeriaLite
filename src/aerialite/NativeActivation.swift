@@ -108,6 +108,21 @@ enum NativeActivation {
         throw Failure("the native wallpaper extension did not stay running within 60 seconds")
     }
 
+    /// Brings back a backend WallpaperAgent has stopped presenting, without touching registration
+    /// or the wallpaper store. The extension is hosted on demand and an instance with nothing to
+    /// present is disconnected, which is the ordinary state after an install that is not followed
+    /// by a launch: activation verified a live backend, then no agent published a playlist, so the
+    /// extension idled and was dropped. Starting the agent later does not make WallpaperAgent
+    /// reacquire on its own, so the app would show a dead backend until the next reinstall.
+    ///
+    /// Restarting the agent is the whole mechanism, and it is only worth doing when the backend is
+    /// already dead, so the caller checks first.
+    static func reacquire() -> Bool {
+        let started = Date()
+        restartWallpaperServices()
+        return live(after: started, until: started.addingTimeInterval(30))
+    }
+
     /// Only heartbeats from after the restart count. The outgoing agent relaunches the extension
     /// on demand while it is being torn down, and that short-lived process publishes a heartbeat
     /// newer than the store rewrite, so a sample taken from before the restart passes on a session
