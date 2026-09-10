@@ -40,6 +40,14 @@ import SwiftUI
         popover.setValue(true, forKey: "shouldHideAnchor")   // drops the arrow pointing at the status item
         // the panel is built on first open, so SwiftUI stays out of the process for anyone who
         // sets an order once and never opens the menu again
+        //
+        // Created once and never rebuilt. On macOS 26 a status item is not a window this process
+        // owns: AppKit asks com.apple.controlcenter.statusitems for an FBSScene and exports the
+        // button into it, so `button.window` is a detached host that never reports menu bar
+        // coordinates and ControlCenter does the placing. Any liveness check written against that
+        // window's frame reads as "not in the menu bar" forever, and removeStatusItem sends
+        // NSStatusItemClearAutosaveStateAction, so rebuilding on that signal both discards the item
+        // ControlCenter had already accepted and erases the saved slot on every pass.
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // Named so macOS remembers wherever it is command-dragged to.
         status.autosaveName = "AeriaLite"
@@ -56,12 +64,9 @@ import SwiftUI
         }
     }
 
-
-
     /// The same silhouette the app icon is built from, bundled by scripts/bundle.sh. Marked as a
     /// template so AppKit tints it to whatever the menu bar is doing, which is the only way this
     /// tracks light and dark.
-
     private static let helmet: NSImage? = {
         guard let url = Bundle.main.url(forResource: "MenuIcon", withExtension: "png"),
               let image = NSImage(contentsOf: url) else { return nil }
