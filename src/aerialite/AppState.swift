@@ -200,7 +200,8 @@ import Combine
             paused: paused,
             speed: speed,
             repeatOne: repeatOne,
-            shuffle: shuffle
+            shuffle: shuffle,
+            transition: settings.transition
         ))
     }
 

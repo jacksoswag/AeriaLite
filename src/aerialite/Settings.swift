@@ -54,6 +54,9 @@ struct Settings: Codable {
     /// is missing, 2 streams everything and falls back to this clip.s own downloaded copy when
     /// the link cannot carry it. The fallback is always the same wallpaper, never a different one.
     var streamMode = 1
+    /// How one clip gives way to the next. Hand-edited like everything else here; the agent
+    /// clamps it and carries it to the extension in the command snapshot.
+    var transition = Transition()
     /// Filter names the panel opens on every launch. Empty leaves it on whatever view was last
     /// used, which the catalogue remembers.
     var defaultView: [String] = []
@@ -75,6 +78,7 @@ struct Settings: Codable {
         defSpeed = try c.decodeIfPresent(Double.self, forKey: .defSpeed) ?? defSpeed
         maxCache = try c.decodeIfPresent(Cache.self, forKey: .maxCache) ?? maxCache
         streamMode = try c.decodeIfPresent(Int.self, forKey: .streamMode) ?? streamMode
+        transition = try c.decodeIfPresent(Transition.self, forKey: .transition) ?? transition
         // one name or several, since a single view is the common case and quoting it as a bare
         // string is what anyone hand-editing this reaches for first
         if let one = try? c.decodeIfPresent(String.self, forKey: .defaultView) { defaultView = [one] }

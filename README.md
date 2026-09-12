@@ -107,6 +107,8 @@ aerialite prep <input> [-o out] [--keep 0-1] [--size WxH] [--bitrate BPS] [--key
   "downloads": { "resolution": "1080p", "framesKept": 0.25,
                  "bitrate": 2500000, "maxSeconds": 180 },
   "maxCache":  { "space": "3000", "videos": 2, "capAtHigh": false },
+  "transition": { "seconds": 1.6, "style": "difference", "curve": "smootherstep",
+                  "spread": 0.7, "stagger": 0.35, "chroma": 0.3, "manual": true },
   "streamMode": 1,
   "defaultView": "Favorites",
   "defSpeed": 1
@@ -116,6 +118,47 @@ aerialite prep <input> [-o out] [--keep 0-1] [--size WxH] [--bitrate BPS] [--key
 `framesKept` is a fraction of the source's own frames, so `0.5` halves a 239.76fps master to 119.88 without touching duration or speed. `resolution` is `native`, `1080p` or `4k`; native means the display's backing store, which on a scaled Retina panel is neither the point size nor the panel size. A `bitrate` of 0 or absent matches the source's own bits per pixel.
 
 `defaultView` pins the panel to a filter on every launch, one of `All`, `Favorites`, `Downloaded`, or an array of them. Leave the key out and it reopens on whatever view you left it on, which `wallpapers.json` remembers. Either way the view is the queue: a clip filtered out goes off the screen and out of the rotation together.
+
+## The blend between clips
+
+`transition` is the window in which one clip becomes the next. Nothing in it depends on where a
+pixel is: the only input is how far apart the two clips are at that pixel, and every pixel crosses
+on a schedule read from its own colour distance.
+
+What a plain crossfade gets wrong is that it holds the whole frame at fifty per cent of two
+different pictures at once, and the double exposure is worst exactly where the clips disagree
+most — the only places the eye was going to look. So the pixels that disagree get the *shortest*
+crossings, spending as little time as possible in the ambiguous middle, and the pixels the clips
+already agree on get the longest, because a slow cross between two colours that match is free and
+invisible. Those short crossings are then staggered across the window by the same measure, so they
+do not all land at once: broad regions of the frame resolve at different moments, in order of how
+much they had to change. That ordering is the whole of the movement, and it comes out of the
+footage rather than out of a pattern laid over it.
+
+`seconds` is the length of the window in wall-clock time, up to 10; `0` restores the hard cut, as
+does `"style": "none"`. The outgoing clip is never truncated, the incoming one simply starts this
+early, so a rotation loses this much from each clip's tail rather than gaining a pause.
+
+`spread` is how much a pixel's colour difference shortens its crossing. At `0` every pixel is on
+one schedule, which is an ordinary fade — `"style": "crossfade"` is the same thing by another
+name. Raising it trades ghosting for decisiveness. `stagger` is where the shortened crossings sit:
+positive puts the pixels that changed most last, negative first, `0` centres everything and leaves
+only the differing rates. `chroma` is how much each channel follows its own difference rather than
+the pixel's overall one, which leaves a whisper of colour separation where the clips disagree about
+hue but not brightness, and none anywhere else.
+
+`curve` is the shape of the window: `linear`, `smoothstep`, `smootherstep`, `ease`, `easeIn`,
+`easeOut`, `easeInOut`, or four bare numbers for the CSS `cubic-bezier` whose feel you already
+know — `[0.9, 0, 0.1, 1]` holds at both ends and crosses fast through the middle.
+
+`manual` decides whether the switches you ask for by hand blend too: next, previous, clicking a
+clip, and dropping the position slider. A seek is as much of a cut as a change of clip — a seek
+backwards most of all, because the eye recognises where it has been — so it blends the same way,
+against a second copy of the same clip opened at the destination. Set it to `false` to keep the
+rotation blended and everything you touch instant.
+
+A clip shorter than three times the window cuts rather than spending most of itself dissolving,
+and a machine that cannot compile the shader cuts too, silently.
 
 `streamMode` decides where a clip comes from: `0` plays only what is on disk and greys the rest, `1` prefers downloads and fetches what is missing, and `2` refreshes streamed cache copies while retaining the same clip's durable download if the network transfer fails.
 

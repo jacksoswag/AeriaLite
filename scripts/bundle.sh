@@ -57,8 +57,11 @@ xcrun swiftc -parse-as-library -O -gnone -swift-version 5 -application-extension
   -I "$MODULES" \
   -F "$SDK/System/Library/PrivateFrameworks" \
   "$ROOT/src/aerialite/NativeIPC.swift" \
+  "$ROOT/src/aerialite/Transition.swift" \
+  "$ROOT/src/wallpaper-extension/Blend.swift" \
   "$ROOT/src/wallpaper-extension/main.swift" \
-  -framework AVFoundation -framework QuartzCore -framework WallpaperExtensionKit \
+  -framework AVFoundation -framework CoreVideo -framework Metal \
+  -framework QuartzCore -framework WallpaperExtensionKit \
   -Xlinker -e -Xlinker _NSExtensionMain \
   -o "$EXT_CONTENTS/MacOS/AeriaLiteWallpaperExtension"
 

@@ -31,6 +31,11 @@ enum NativeIPC {
         var speed: Double
         var repeatOne: Bool
         var shuffle: Bool
+        /// Absent in a snapshot an older build left behind, which is exactly what an upgrade
+        /// leaves the extension reading until the new agent publishes over it.
+        var transition: Transition?
+
+        var blend: Transition { transition ?? Transition() }
     }
 
     struct Status: Codable, Equatable {

@@ -71,10 +71,73 @@ for a second agent. The agent also republishes whenever the command file's revis
 it last wrote, since publishing is otherwise driven by state changes and an overwrite leaves the
 extension following stale instructions indefinitely.
 
-`NativeWallpaperSession` owns that layer and puts an aspect-fill `AVPlayerLayer` in it. It polls an
-atomic command snapshot every 200 ms, applies playlist/transport/rate changes, and writes an atomic
-status snapshot. The app regards the backend as live only while that heartbeat is newer than three
-seconds.
+`NativeWallpaperSession` owns that layer and puts two aspect-fill `AVPlayerLayer`s in it. It polls
+an atomic command snapshot every 200 ms, applies playlist/transport/rate changes, and writes an
+atomic status snapshot. The app regards the backend as live only while that heartbeat is newer than
+three seconds.
+
+## Blending one clip into the next
+
+The second player exists only so a clip can be decoding while the one before it is still on screen.
+A periodic observer starts the next clip `transition.seconds` of wall-clock time before the current
+one runs out — measured in the clip's own time, so a rate other than 1 still spends the configured
+number of seconds blending — and from that moment the incoming deck is the playing clip as far as
+status, transport and the next switch are concerned.
+
+Every frame the desktop shows is drawn by one `CAMetalLayer`, whether a transition is running or
+not. The `AVPlayerLayer`s are hidden and decode only; frames are pulled out of them as 32BGRA
+through `AVPlayerItemVideoOutput`, wrapped through a `CVMetalTextureCache`, and drawn by a
+`CAMetalDisplayLink`. Steady state is a single resample of the decoder's own pixels with no colour
+arithmetic applied at all, which is checked against the raw decoded texture rather than asserted.
+
+That is the second architecture. The first kept the player layers on screen and let the blend layer
+take over for the length of a window, and the handover could not be made invisible. It failed twice
+over, for reasons that have nothing to do with each other. It failed on colour, because
+AVFoundation's video pipeline and CoreAnimation's layer compositing reach the display profile by
+different routes, and the gap between them is only as small as the display profile is ordinary — on
+a custom wide-gamut profile, sRGB values converted and unconverted are 77/255 apart at saturated
+cyan. And it failed on time, because this side pulls the frame matching the next presentation
+timestamp while the player layer underneath shows whatever frame it has, so the two disagree by a
+frame or two at each end. Neither gap closes by calibration: matching them on one display and one
+profile only moves the problem to the next. Drawing everything through one path removes the
+question instead of answering it.
+
+Colour is read from the first frame's own buffer attachments with
+`CVImageBufferCreateColorSpaceFromAttachments` and given to the layer, so CoreAnimation converts to
+whatever profile the display is running; the fallback when a clip declares nothing is
+`CGDisplayCopyColorSpace`. No colour space is named as a constant anywhere in the extension. An
+earlier version hardcoded 709 and was wrong: Apple's aerials pair `ITU_R_709_2` primaries with an
+`IEC_sRGB` transfer function, which differ most in the shadows.
+
+The blend has no spatial term. A first pass, run once on the frame pair a window opens on, writes a
+schedule texture holding each channel's distance between the two clips at that pixel; every frame
+after it reads that map and gives the pixel a crossing whose width shrinks with the distance and
+whose position in the window is staggered by it. Pixels the clips disagree about therefore spend
+the least time half-way between them, which is where a plain crossfade puts its worst ghosting, and
+pixels they agree about cross slowly because doing so costs nothing visible. The shader linearises
+with the exact sRGB pair, and its round trip is checked against the raw source texture rather than
+against a second pass of itself, which would agree perfectly however wrong it was.
+
+Computing that map once rather than per frame is load-bearing. Against two moving clips a
+recomputed map would let a pixel's crossing speed up, slow down, or run backwards between frames,
+which reads as a shimmer; fixing it makes every pixel's progress monotonic by construction, and
+that is checked across a 60-step sweep rather than argued.
+
+Drawing every frame costs what the player layers used to get for free, so the compositor draws only
+when something changed, and stops entirely while presentation is idle — a `CAMetalLayer` holds its
+last presented drawable, so suspending the link leaves the frame up rather than going black.
+
+Every layer in the tree is told the display's backing scale explicitly. The host hands this process
+a bare `CALayer` with a `contentsScale` of 1, and CoreAnimation only propagates that value down an
+`NSView`'s own layer tree, so nothing here inherits it. Left alone, video is composited at the point
+size and scaled up to the framebuffer — half the resolution the clip was encoded for on a Retina
+panel, which reads exactly like a bad encode and has nothing to do with the encode.
+
+With no player layer visible behind it, a compositor that stops producing frames does not cost a
+transition, it freezes the desktop. The 200 ms poll watches the last presentation time and, past two
+seconds, surrenders: the player layers come back for the life of the process and the blend is given
+up. Failing to build the compositor at all does the same thing immediately. That is the only path
+left on which a seam is visible, and it is the one where the alternative is a still image.
 
 `snapshot()` decodes a still separately, through `AVAssetImageGenerator` at the playhead, rather
 than reusing the playing frame. The host asks for it wherever it cannot run the layer—Mission
