@@ -46,6 +46,8 @@ enum NativeIPC {
         var actionRevision: UInt64 = 0
         var heartbeat = Date.distantPast
 
+        var renderer: [String: String]?
+
         var isLive: Bool { Date().timeIntervalSince(heartbeat) < 3 }
     }
 

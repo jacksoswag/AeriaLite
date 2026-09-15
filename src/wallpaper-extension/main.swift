@@ -92,6 +92,7 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     private var blendDeadline: CFTimeInterval = 0
     /// Set once, permanently, if the compositor ever stops producing frames.
     private var surrendered = false
+    private var fallbackReason = ""
     private let scale: CGFloat
     private var poller: Timer?
     private var endObserver: NSObjectProtocol?
@@ -210,14 +211,11 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
 
     @MainActor private func tick() {
         if blending, CACurrentMediaTime() > blendDeadline { settleBlend() }
-        // Giving up has to be rarer than being interrupted. A link that stops because the system
-        // is not compositing this layer — Mission Control, a sleeping display — is normal and
-        // `revive` above simply keeps asking. Only two things are actual faults: a rebuilt link
-        // that never once calls back, and callbacks that never become frames.
+        // Clock interruptions (for example display sleep) are not rendering failures.
+        // Only callbacks that continuously fail to produce frames justify fallback.
         if let blend, !surrendered, let command, command.running, !command.paused,
-           decks[active].player.currentItem != nil,
-           blend.revivals > 25 || blend.isDrawingButNotPresenting {
-            surrender()
+           decks[active].player.currentItem != nil, blend.isDrawingButNotPresenting {
+            surrender(reason: "callbacks-without-frames")
         }
 
         guard let next = NativeIPC.readCommand() else {
@@ -252,8 +250,12 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
             // to the clip that won.
             if next.paused { settleBlend() }
             if decks[active].player.currentItem == nil { open(cursor, manual: false) }
-            blend?.resume()
-            blend?.revive()
+            if next.paused {
+                blend?.suspend()
+            } else {
+                blend?.resume()
+                blend?.revive()
+            }
             if !blending { showActiveDeck() }
             let player = decks[active].player
             if next.paused { player.pause() }
@@ -450,8 +452,10 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     /// visible behind it, so a display link that stops firing does not cost a transition, it
     /// freezes the desktop. That is the one outcome worse than a visible seam, and this is the
     /// only thing standing between the two.
-    @MainActor private func surrender() {
+    @MainActor private func surrender(reason: String) {
         guard !surrendered else { return }
+        fallbackReason = reason
+        NSLog("AeriaLite renderer fallback: %@; callbacks=%d frames=%d revivals=%d", reason, blend?.callbacks ?? 0, blend?.framesSubmitted ?? 0, blend?.revivals ?? 0)
         surrendered = true
         blending = false
         blend?.stop()
@@ -481,7 +485,7 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
         // of a transition, it is the loss of the desktop. Hand it straight back to the players.
         guard let made = Blend.make() else {
             blendUsable = false
-            surrender()
+            surrender(reason: "compositor-creation-failed")
             return nil
         }
         made.place(in: root.bounds, scale: scale)
@@ -521,7 +525,19 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
             title: track.title,
             id: track.id,
             actionRevision: actionRevision,
-            heartbeat: Date()
+            heartbeat: Date(),
+            renderer: [
+                "state": surrendered ? "fallback" : "metal",
+                "reason": fallbackReason,
+                "callbacks": String(blend?.callbacks ?? 0),
+                "frames": String(blend?.framesSubmitted ?? 0),
+                "presented": String(blend?.framesPresented ?? 0),
+                "blendedFrames": String(blend?.blendedFrames ?? 0),
+                "rendered": String(blend?.framesRendered ?? 0),
+                "blendsRendered": String(blend?.blendsRendered ?? 0),
+                "revivals": String(blend?.revivals ?? 0),
+                "blending": String(blending)
+            ]
         ))
     }
 }

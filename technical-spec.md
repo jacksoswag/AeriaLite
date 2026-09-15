@@ -85,9 +85,9 @@ number of seconds blending — and from that moment the incoming deck is the pla
 status, transport and the next switch are concerned.
 
 Every frame the desktop shows is drawn by one `CAMetalLayer`, whether a transition is running or
-not. The `AVPlayerLayer`s are hidden and decode only; frames are pulled out of them as 32BGRA
+not. The `AVPlayerLayer`s are hidden and decode only; frames are pulled out of them as native YCbCr planes
 through `AVPlayerItemVideoOutput`, wrapped through a `CVMetalTextureCache`, and drawn by a
-`CAMetalDisplayLink`. Steady state is a single resample of the decoder's own pixels with no colour
+`CVDisplayLink`. Steady state is a single resample of the decoder's own pixels with no colour
 arithmetic applied at all, which is checked against the raw decoded texture rather than asserted.
 
 That is the second architecture. The first kept the player layers on screen and let the blend layer
@@ -133,11 +133,20 @@ a bare `CALayer` with a `contentsScale` of 1, and CoreAnimation only propagates 
 size and scaled up to the framebuffer — half the resolution the clip was encoded for on a Retina
 panel, which reads exactly like a bad encode and has nothing to do with the encode.
 
-With no player layer visible behind it, a compositor that stops producing frames does not cost a
-transition, it freezes the desktop. The 200 ms poll watches the last presentation time and, past two
-seconds, surrenders: the player layers come back for the life of the process and the blend is given
-up. Failing to build the compositor at all does the same thing immediately. That is the only path
-left on which a seam is visible, and it is the one where the alternative is a still image.
+Rendering uses a display-wide `CVDisplayLink`, independent of the wallpaper layer's visibility.
+A layer-bound `CAMetalDisplayLink` stops supplying callbacks in fullscreen Spaces; that froze the
+compositor, and the old 26-retry watchdog then permanently disabled transitions. The display-wide
+clock keeps normal playback, seeks and clip transitions rendering while the desktop is hidden,
+including for Glassium's `SCContentFilter(desktopIndependentWindow:)` capture of the Dock wallpaper.
+Callbacks are coalesced onto the main queue, and a drawable is acquired only when a frame changes.
+Explicit pause suspends the clock; hiding or covering the desktop does not.
+
+The 200 ms poll retries an interrupted clock after two seconds without counting interruptions as
+permanent failures. A fresh callback run or explicit resume gets five seconds to decode a frame.
+Only continuous callbacks without submitted frames trigger the player-layer fallback. The status
+snapshot records the fallback reason and separate counts of callbacks, submissions, GPU-completed
+frames, presented frames, and transition frames. Decoder surfaces are retained through GPU
+completion. These diagnostics distinguish a live process from a renderer supplying a live stream.
 
 `snapshot()` decodes a still separately, through `AVAssetImageGenerator` at the playhead, rather
 than reusing the playing frame. The host asks for it wherever it cannot run the layer—Mission

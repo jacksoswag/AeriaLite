@@ -58,6 +58,7 @@ xcrun swiftc -parse-as-library -O -gnone -swift-version 5 -application-extension
   -F "$SDK/System/Library/PrivateFrameworks" \
   "$ROOT/src/aerialite/NativeIPC.swift" \
   "$ROOT/src/aerialite/Transition.swift" \
+  "$ROOT/src/aerialite/RenderHealth.swift" \
   "$ROOT/src/wallpaper-extension/Blend.swift" \
   "$ROOT/src/wallpaper-extension/main.swift" \
   -framework AVFoundation -framework CoreVideo -framework Metal \
@@ -164,8 +165,9 @@ fi
 ENTRY_OFFSET="$(otool -l "$EXT_CONTENTS/MacOS/AeriaLiteWallpaperExtension" \
   | awk '/LC_MAIN/ { found = 1 } found && /entryoff/ { print $2; exit }')"
 ENTRY_ADDRESS="$(printf '0x%016x' "$((0x100000000 + ENTRY_OFFSET))")"
+# Consume all output: grep -q can SIGPIPE otool under pipefail on larger binaries.
 if ! otool -Iv "$EXT_CONTENTS/MacOS/AeriaLiteWallpaperExtension" \
-    | grep -q "^$ENTRY_ADDRESS .* _NSExtensionMain$"; then
+    | grep "^$ENTRY_ADDRESS .* _NSExtensionMain$" > /dev/null; then
   echo "aerialite: extension does not start at NSExtensionMain" >&2
   exit 1
 fi

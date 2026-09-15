@@ -24,20 +24,19 @@ import simd
 /// The `AVPlayerLayer`s stay in the tree, hidden, and are used for nothing unless this path stops
 /// producing frames — see the session's stall watchdog. A frozen desktop is the one outcome worse
 /// than a visible seam.
-@MainActor final class Blend: NSObject, CAMetalDisplayLinkDelegate {
+@MainActor final class Blend: NSObject {
     let layer = CAMetalLayer()
 
     /// Raised when a transition has run out, so the session can retire the clip it came from.
     var onSettle: (() -> Void)?
-    /// When this side last put a frame on screen. The session watchdogs it, because with no
-    /// player layer visible behind it there is nothing else keeping the desktop alive.
-    private(set) var lastPresented = CACurrentMediaTime()
-    /// Every callback, drawn or not, which is what separates "the link is dead" from "there was
-    /// nothing new to draw".
-    private var lastCallback = CACurrentMediaTime()
-    /// Consecutive rebuilds that produced no callback at all. Reset by the first one that does.
-    /// This is what separates a link the system is deliberately not running — the desktop is
-    /// behind Mission Control, the screen is asleep — from one that is never going to work.
+    private var health = RenderHealth()
+    private(set) var framesSubmitted = 0
+    private(set) var callbacks = 0
+    private(set) var framesPresented = 0
+    private(set) var blendedFrames = 0
+    private(set) var framesRendered = 0
+    private(set) var blendsRendered = 0
+    /// Diagnostic count only; display sleep/reconfiguration may interrupt the clock.
     private(set) var revivals = 0
 
     private let device: MTLDevice
@@ -46,7 +45,8 @@ import simd
     private let presenting: MTLRenderPipelineState
     private let scheduling: MTLRenderPipelineState
     private let textures: CVMetalTextureCache
-    private var link: CAMetalDisplayLink?
+    private var link: CVDisplayLink?
+    private var renderSignal: DispatchSourceUserDataAdd?
 
     /// The clip on screen, and — only while a transition runs — the clip replacing it.
     private var primary: AVPlayerItemVideoOutput?
@@ -69,7 +69,8 @@ import simd
         var scheduled = false
     }
 
-    private struct Frame {
+    // Immutable decoder surfaces, read by the GPU and retained through its completion callback.
+    private struct Frame: @unchecked Sendable {
         let keep: [CVMetalTexture]     // the cache hands back wrappers the textures' lives depend on
         let buffer: CVPixelBuffer      // carries the colour tags the layer has to be given
         let luma: MTLTexture
@@ -83,6 +84,11 @@ import simd
         let chromaBias: Float
         let kr: Float
         let kb: Float
+    }
+
+    deinit {
+        if let link { CVDisplayLinkStop(link) }
+        renderSignal?.cancel()
     }
 
     /// Anything missing here means the machine cannot run the shader, and the caller falls back to
@@ -201,18 +207,12 @@ import simd
         drive(false)
     }
 
-    /// Rebuilds a display link that has stopped delivering callbacks.
-    ///
-    /// The link has to be created before there is any way to know the host has attached this layer
-    /// to a display, and one created too early never fires at all. That used to cost a transition;
-    /// now that nothing else draws the desktop it costs the desktop. Rather than guess when the
-    /// layer becomes displayable, the session's poll asks this to check itself — and a link that
-    /// has not called back is thrown away and built again, as often as it takes.
+    /// Rebuild the display clock after a display interruption. This clock is deliberately not
+    /// attached to the wallpaper layer: capture clients still need frames in fullscreen Spaces.
     func revive() {
         guard !suspended, primary != nil else { return }
-        guard CACurrentMediaTime() - lastCallback > 0.5 else { return }
-        link?.invalidate()
-        link = nil
+        guard CACurrentMediaTime() - health.lastCallback > 2 else { return }
+        stopClock()
         revivals += 1
         drive(true)
     }
@@ -220,8 +220,7 @@ import simd
     /// True when the link is delivering callbacks but they are not turning into frames, which is
     /// a fault in this file rather than in the system's willingness to run it.
     var isDrawingButNotPresenting: Bool {
-        let now = CACurrentMediaTime()
-        return now - lastCallback < 1 && now - lastPresented > 5
+        health.isStalled(at: CACurrentMediaTime())
     }
 
     func resume() {
@@ -232,8 +231,7 @@ import simd
     }
 
     func stop() {
-        link?.invalidate()
-        link = nil
+        stopClock()
         run = nil
         primary = nil
         incoming = nil
@@ -260,30 +258,49 @@ import simd
         }
     }
 
+    private func stopClock() {
+        if let link { CVDisplayLinkStop(link) }
+        link = nil
+        renderSignal?.cancel()
+        renderSignal = nil
+    }
+
     private func drive(_ wanted: Bool) {
         if wanted, !suspended, link == nil {
-            let started = CAMetalDisplayLink(metalLayer: layer)
-            started.delegate = self
-            started.add(to: .main, forMode: .common)
+            // CAMetalDisplayLink is gated by the layer's visibility. CVDisplayLink follows the
+            // display itself, so the Dock's captured wallpaper keeps animating behind fullscreen
+            // apps. Coalescing prevents a busy main thread from accumulating frame callbacks.
+            var started: CVDisplayLink?
+            guard CVDisplayLinkCreateWithActiveCGDisplays(&started) == kCVReturnSuccess,
+                  let started else { return }
+            let signal = DispatchSource.makeUserDataAddSource(queue: .main)
+            signal.setEventHandler { [weak self] in
+                MainActor.assumeIsolated {
+                    autoreleasepool { self?.draw(at: CACurrentMediaTime()) }
+                }
+            }
+            signal.resume()
+            guard CVDisplayLinkSetOutputHandler(started, { _, _, _, _, _ in
+                signal.add(data: 1)
+                return kCVReturnSuccess
+            }) == kCVReturnSuccess else {
+                signal.cancel()
+                return
+            }
             link = started
-            lastPresented = CACurrentMediaTime()
-            lastCallback = lastPresented
+            renderSignal = signal
+            health.restart(at: CACurrentMediaTime())
+            if CVDisplayLinkStart(started) != kCVReturnSuccess { stopClock() }
         } else if !wanted {
-            link?.invalidate()
-            link = nil
+            stopClock()
         }
     }
 
-    // MARK: CAMetalDisplayLinkDelegate
-
-    nonisolated func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
-        MainActor.assumeIsolated { draw(update) }
-    }
-
-    @MainActor private func draw(_ update: CAMetalDisplayLink.Update) {
-        lastCallback = CACurrentMediaTime()
+    @MainActor private func draw(at now: CFTimeInterval) {
+        guard !suspended, primary != nil else { return }
+        callbacks += 1
+        health.callback(at: CACurrentMediaTime())
         revivals = 0
-        let now = update.targetPresentationTimestamp
         CVMetalTextureCacheFlush(textures, 0)
         if let primary, let fresh = pull(primary, at: now) { heldPrimary = fresh; needsDraw = true }
         if let incoming, let fresh = pull(incoming, at: now) { heldIncoming = fresh; needsDraw = true }
@@ -310,31 +327,30 @@ import simd
                 // one up meanwhile is exactly what the player layer used to do, and costs the
                 // window only the milliseconds it actually waited.
                 if now - current.opened > Blend.primingGrace { finishRun() }
-                return present(update.drawable, showing, nil, 0, run: nil)
+                return present(showing, nil, 0, run: nil)
             }
             if current.started == nil { current.started = now; needsDraw = true }
             let elapsed = now - (current.started ?? now)
             progress = current.config.seconds > 0 ? min(1, max(0, elapsed / current.config.seconds)) : 1
             run = current
-            present(update.drawable, showing, arriving, progress, run: current)
+            present(showing, arriving, progress, run: current)
             if progress >= 1 {
                 finishRun()
                 onSettle?()
             }
             return
         }
-        present(update.drawable, showing, nil, 0, run: nil)
+        present(showing, nil, 0, run: nil)
     }
 
     /// Draws, and only draws when something has changed. A wallpaper that redraws an identical
     /// frame at the display's refresh rate is a wallpaper that spends battery on nothing.
     ///
-    /// The drawable is the one the display link vended. A `CAMetalLayer` with a
-    /// `CAMetalDisplayLink` attached refuses `nextDrawable()` — it throws, and thrown from inside
-    /// the link's own callback that is an abort, not a dropped frame.
-    @MainActor private func present(_ drawable: any CAMetalDrawable, _ showing: Frame,
+    /// No layer-bound display link owns the drawable queue; acquire only after a frame changes.
+    @MainActor private func present(_ showing: Frame,
                                     _ arriving: Frame?, _ progress: Double, run current: Run?) {
-        guard needsDraw || current != nil, let buffer = queue.makeCommandBuffer() else { return }
+        guard needsDraw || current != nil, let drawable = layer.nextDrawable(),
+              let buffer = queue.makeCommandBuffer() else { return }
         needsDraw = false
         let target = CGSize(width: drawable.texture.width, height: drawable.texture.height)
         let style = current.map { styleCode($0.config.style) } ?? 0
@@ -389,9 +405,27 @@ import simd
             // is applied and none is undone, so what reaches the display is what was decoded.
             guard encode(presenting, into: drawable.texture, reading: showing.luma) else { return }
         }
+        let isTransitionFrame = current != nil
+        drawable.addPresentedHandler { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.framesPresented += 1
+                if isTransitionFrame { self?.blendedFrames += 1 }
+            }
+        }
+        buffer.addCompletedHandler { [weak self] completed in
+            // The pixel-buffer wrappers must outlive the GPU's reads of their IOSurfaces.
+            withExtendedLifetime((showing, arriving)) {}
+            let succeeded = completed.status == .completed
+            DispatchQueue.main.async {
+                guard succeeded else { return }
+                self?.framesRendered += 1
+                if isTransitionFrame { self?.blendsRendered += 1 }
+            }
+        }
         buffer.present(drawable)
         buffer.commit()
-        lastPresented = CACurrentMediaTime()
+        framesSubmitted += 1
+        health.submitted(at: CACurrentMediaTime())
     }
 
     /// Sized to the drawable and sampled 1:1 with it, so a pixel's schedule is read back at

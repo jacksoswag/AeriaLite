@@ -121,6 +121,9 @@ aerialite prep <input> [-o out] [--keep 0-1] [--size WxH] [--bitrate BPS] [--key
 
 ## The blend between clips
 
+Playback and transitions continue while the desktop is hidden, including behind fullscreen apps
+that capture the wallpaper, such as Glassium. Only explicitly pausing playback pauses rendering.
+
 `transition` is the window in which one clip becomes the next. Nothing in it depends on where a
 pixel is: the only input is how far apart the two clips are at that pixel, and every pixel crosses
 on a schedule read from its own colour distance.
