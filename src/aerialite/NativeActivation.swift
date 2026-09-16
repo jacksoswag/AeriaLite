@@ -20,6 +20,7 @@ enum NativeActivation {
         // Never let a process from a previous bundle revision satisfy the health check.
         _ = try? run("/usr/bin/pkill", ["-x", "AeriaLiteWallpaperExtension"])
         try? FileManager.default.removeItem(at: NativeIPC.status)
+        reconcileLaunchServices()
         try run("/usr/bin/pluginkit", ["-a", builtIn.path])
         let expectedPath = builtIn.standardizedFileURL.path
         var registration = ""
@@ -118,10 +119,35 @@ enum NativeActivation {
     /// Restarting the agent is the whole mechanism, and it is only worth doing when the backend is
     /// already dead, so the caller checks first.
     static func reacquire() -> Bool {
+        reconcileLaunchServices()
         let started = Date()
         restartWallpaperServices()
         return live(after: started, until: started.addingTimeInterval(30))
     }
+
+    /// Makes LaunchServices' record of this app agree, byte for byte, with the path the bundle
+    /// actually has on disk.
+    ///
+    /// ExtensionKit decides whether an appex may launch by asking LaunchServices for its containing
+    /// app and checking that the appex path lies under it — as a string, not as a file identity.
+    /// pkd, by contrast, records the appex at the name the volume reports. On a case-insensitive
+    /// APFS volume those diverge the moment the bundle is renamed by case alone: a Finder rename of
+    /// `aerialite.app` to `AeriaLite.app` changes nothing the kernel can see, so the running
+    /// extension keeps going, but LaunchServices still holds the old spelling and pkd picks up the
+    /// new one. At the next login extensionkitservice logs "extension … is not inside its
+    /// containing app", WallpaperAgent gets `com.apple.extensionKit.errorDomain` code 2 in tens of
+    /// milliseconds, and falls back to Apple's aerial with nothing to retry. Re-registering by the
+    /// canonical path is idempotent and cheap, so it runs before every registration and every
+    /// recovery rather than only when the divergence has already been noticed.
+    private static func reconcileLaunchServices() {
+        let bundle = Bundle.main.bundleURL.standardizedFileURL
+        let canonical = (try? bundle.resourceValues(forKeys: [.canonicalPathKey]).canonicalPath)
+            ?? bundle.path
+        _ = try? run(lsregister, ["-f", canonical])
+    }
+
+    private static let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+        + "LaunchServices.framework/Support/lsregister"
 
     /// Only heartbeats from after the restart count. The outgoing agent relaunches the extension
     /// on demand while it is being torn down, and that short-lived process publishes a heartbeat

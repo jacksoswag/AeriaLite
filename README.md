@@ -53,7 +53,7 @@ git clone https://github.com/jacksoswag/AeriaLite.git
 cd AeriaLite && ./scripts/install.sh
 ```
 
-Builds release, bundles `aerialite.app` into `~/Applications` and symlinks `aerialite` onto your PATH. It deliberately does not launch the app: open AeriaLite from Finder or Spotlight once, and it adds itself to Login Items so the wallpaper is up before you are. Remove it there to stop that. Set `APPS` or `BIN_DIR` to put either somewhere else.
+Builds release, bundles `AeriaLite.app` into `~/Applications` and symlinks `aerialite` onto your PATH. It deliberately does not launch the app: open AeriaLite from Finder or Spotlight once, and it adds itself to Login Items so the wallpaper is up before you are. Remove it there to stop that. Set `APPS` or `BIN_DIR` to put either somewhere else.
 
 That first launch has to come from you rather than from the installer. macOS 26 files a menu bar item under whichever application is *responsible* for the process that created it, and an installer run from a terminal makes the terminal responsible. See [below](#if-the-menu-bar-icon-does-not-appear).
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs aerialite.app into ~/Applications, puts the same binary on PATH for `aerialite prep`,
+# Installs AeriaLite.app into ~/Applications, puts the same binary on PATH for `aerialite prep`,
 # and registers a login agent so the wallpaper is up before you are.
 set -euo pipefail
 
@@ -9,7 +9,13 @@ BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aerialite"
 LABEL="com.jacksonadams.aerialite"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-APP="$APPS/aerialite.app"
+# Installed under the name the app shows in Finder. ExtensionKit checks that the appex path lies
+# under the containing app's LaunchServices path as a string, and pkd records the appex under the
+# name the volume reports, so on case-insensitive APFS a case-only rename of the bundle (which the
+# kernel treats as a no-op) breaks the extension at the next login. Matching the visible name
+# removes the reason anyone would rename it; activate-native re-registers by canonical path in case
+# they do anyway.
+APP="$APPS/AeriaLite.app"
 
 if [ "${AERIALITE_USE_EXISTING_BUNDLE:-0}" = "1" ]; then
   [ -d "$ROOT/output/aerialite.app" ] || {
@@ -44,7 +50,7 @@ STAGED_APP="$STAGE_DIR/payload"
 # WallpaperAgent is presenting, so all churn there has to finish before activation rather than
 # after it.
 KEEP_DIR="$HOME/Library/Caches/AeriaLite/rollback.$$"
-PREVIOUS_APP="$KEEP_DIR/aerialite.app"
+PREVIOUS_APP="$KEEP_DIR/AeriaLite.app"
 ROLLBACK=0
 cleanup() {
   status=$?
@@ -63,7 +69,7 @@ mkdir -p "$KEEP_DIR"
 cp -R "$ROOT/output/aerialite.app" "$STAGED_APP"
 
 launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
-pkill -f "aerialite.app/Contents/MacOS/aerialite" 2>/dev/null || true
+pkill -if "aerialite.app/Contents/MacOS/aerialite" 2>/dev/null || true
 # Let the old agent finish its termination handler before bootstrapping; a job still tearing down
 # answers EIO.
 for _ in $(seq 20); do

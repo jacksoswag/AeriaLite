@@ -60,8 +60,21 @@ every `WallpaperExtensionKit` symbol it imports must be one the framework export
 Aerial's public repository and `v4.1.0beta15` tag do not contain the `Aerial4WallpaperExtension`
 target or its backend source, so this was derived from the shipped framework rather than from it.
 
-The menu agent is a login item, registered by the app itself with `SMAppService` on first run,
-and `install.sh` starts it with `open`.
+The menu agent is a login item, registered by the app itself with `SMAppService` on first run.
+`install.sh` deliberately does not launch it; see the README on menu bar item ownership.
+
+ExtensionKit will only launch an appex whose path lies under its containing app's path *as
+LaunchServices records it*, compared as strings. pkd records the appex under whatever name the
+volume reports. On case-insensitive APFS a case-only rename of the bundle—`aerialite.app` to
+`AeriaLite.app` in Finder—is invisible to the kernel and to a running extension, but leaves
+LaunchServices holding the old spelling and pkd the new one. At the next login
+`extensionkitservice` logs "extension … is not inside its containing app", `WallpaperAgent`
+receives `com.apple.extensionKit.errorDomain` code 2 within tens of milliseconds of connecting,
+falls back to Apple's aerial, and does not retry. The store still names AeriaLite, the signatures
+still verify, and `pluginkit -m` still lists the appex, so nothing local looks wrong. The installer
+therefore installs under the visible name so there is nothing to rename, and `NativeActivation`
+runs `lsregister -f` on the bundle's canonical path before every registration and every
+launch-time recovery, which makes the two records agree again whatever was done to the name.
 
 The command file is process-global, so the agent takes an advisory lock before serving `play`: a
 second agent's `shutdown()` publishes `running: false` and stops the wallpaper the first one is

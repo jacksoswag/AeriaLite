@@ -62,7 +62,7 @@ footprint_of() {
 
 perf() {
   local aerialite="/Users/Shared/AeriaLite"
-  local app="${AERIALITE_APP:-$HOME/Applications/aerialite.app}"
+  local app="${AERIALITE_APP:-$HOME/Applications/AeriaLite.app}"
   local app_bin="$app/Contents/MacOS/aerialite"
   local extension="$app/Contents/Extensions/AeriaLiteWallpaperExtension.appex"
   local extension_bin="$extension/Contents/MacOS/AeriaLiteWallpaperExtension"
