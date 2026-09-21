@@ -536,6 +536,7 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
                 "rendered": String(blend?.framesRendered ?? 0),
                 "blendsRendered": String(blend?.blendsRendered ?? 0),
                 "revivals": String(blend?.revivals ?? 0),
+                "depth": String(blend?.depth ?? 0),
                 "blending": String(blending)
             ]
         ))

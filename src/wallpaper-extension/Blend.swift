@@ -38,6 +38,9 @@ import simd
     private(set) var blendsRendered = 0
     /// Diagnostic count only; display sleep/reconfiguration may interrupt the clock.
     private(set) var revivals = 0
+    /// Bits per channel of the last frame pulled, 0 until one has been: what the decoder actually
+    /// handed over, which is what tells an 8-bit sky apart from a 10-bit one in the status file.
+    private(set) var depth = 0
 
     private let device: MTLDevice
     private let queue: MTLCommandQueue
@@ -111,12 +114,19 @@ import simd
             descriptor.colorAttachments[0].pixelFormat = format
             return try? device.makeRenderPipelineState(descriptor: descriptor)
         }
-        guard let blending = state("blend_fragment", .bgra8Unorm),
-              let presenting = state("blend_present", .bgra8Unorm),
+        guard let blending = state("blend_fragment", Blend.surfaceFormat),
+              let presenting = state("blend_present", Blend.surfaceFormat),
               let scheduling = state("blend_schedule", .rgba8Unorm) else { return nil }
         return Blend(device: device, queue: queue, blending: blending,
                      presenting: presenting, scheduling: scheduling, textures: cache)
     }
+
+    /// Ten bits a channel, because the footage is. Apple's masters are Main 10 and the conform
+    /// keeps them that way, and an 8-bit surface throws the two low bits away right where a dark
+    /// sky needs them: the gradient posterises, and CoreAnimation's conversion from the clip's
+    /// colour space to the display's then spreads the steps further apart. The alpha bits are
+    /// nothing, the layer is opaque.
+    static let surfaceFormat = MTLPixelFormat.bgr10a2Unorm
 
     private init(device: MTLDevice, queue: MTLCommandQueue, blending: MTLRenderPipelineState,
                  presenting: MTLRenderPipelineState, scheduling: MTLRenderPipelineState,
@@ -130,7 +140,7 @@ import simd
         super.init()
 
         layer.device = device
-        layer.pixelFormat = .bgra8Unorm
+        layer.pixelFormat = Blend.surfaceFormat
         layer.framebufferOnly = true
         layer.isOpaque = true
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
@@ -144,12 +154,16 @@ import simd
 
     /// Video frames only reach the shader through an output attached to the item.
     static func makeOutput() -> AVPlayerItemVideoOutput {
-        // The decoder's own planes, in either range, so copying a frame is a retain of a surface
-        // that already exists. Asking for 32BGRA instead buys a full-frame colour conversion per
-        // frame, which at 4K and 240 fps is gigabytes a second spent reformatting something the
-        // shader was about to sample anyway.
+        // The decoder's own planes, at the decoder's own depth and in either range, so copying a
+        // frame is a retain of a surface that already exists. Asking for 32BGRA instead buys a
+        // full-frame colour conversion per frame, which at 4K and 240 fps is gigabytes a second
+        // spent reformatting something the shader was about to sample anyway. The 10-bit formats
+        // come first: a Main 10 clip handed out as 8-bit is rounded, not dithered, and the bands
+        // that puts in a night sky survive everything downstream.
         let attributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: [
+                kCVPixelFormatType_420YpCbCr10BiPlanarFullRange,
+                kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
                 kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
                 kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
             ],
@@ -460,9 +474,23 @@ import simd
                   let wrapped, let texture = CVMetalTextureGetTexture(wrapped) else { return nil }
             return (wrapped, texture)
         }
-        guard let luma = plane(0, .r8Unorm), let chroma = plane(1, .rg8Unorm) else { return nil }
+        // Ten-bit planes are 16-bit words with the sample in the top ten bits, so read as unorm
+        // they land at code × 64 / 65535 and the range constants below are scaled to match.
+        let format = CVPixelBufferGetPixelFormatType(buffer)
+        let deep = format == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange
+                || format == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
+        let full = format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+                || format == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange
+        guard let luma = plane(0, deep ? .r16Unorm : .r8Unorm),
+              let chroma = plane(1, deep ? .rg16Unorm : .rg8Unorm) else { return nil }
+        depth = deep ? 10 : 8
 
-        let full = CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        // Black, white and chroma centre as the sampler will see them: 16/235/128 of 255 for
+        // 8-bit video range, 64/940/512 of 1023 for 10-bit, and 0/peak/centre for full range.
+        let peak: Float = deep ? 65535.0 / 64.0 : 255.0      // the sampler's unit in codes
+        let (black, white, centre, chromaTop): (Float, Float, Float, Float) = deep
+            ? (full ? 0 : 64, full ? 1023 : 940, 512, full ? 1023 : 960)
+            : (full ? 0 : 16, full ? 255 : 235, 128, full ? 255 : 240)
         let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
         let (kr, kb): (Float, Float)
         switch matrix {
@@ -473,10 +501,10 @@ import simd
         }
         return Frame(keep: [luma.0, chroma.0], buffer: buffer, luma: luma.1, chroma: chroma.1,
                      size: CGSize(width: width, height: height),
-                     lumaScale: full ? 1 : 255.0 / 219.0,
-                     lumaBias: full ? 0 : 16.0 / 255.0,
-                     chromaScale: full ? 1 : 255.0 / 224.0,
-                     chromaBias: 128.0 / 255.0,
+                     lumaScale: peak / (white - black),
+                     lumaBias: black / peak,
+                     chromaScale: peak / (chromaTop - black),
+                     chromaBias: centre / peak,
                      kr: kr, kb: kb)
     }
 
@@ -553,7 +581,7 @@ extension Blend {
         float lumaScale;      // video range to full, or 1 when the clip is already full range
         float lumaBias;
         float chromaScale;
-        float chromaBias;     // 128/255, not 0.5: 8-bit chroma centres on 128 of 256 levels
+        float chromaBias;     // the chroma centre in the sampler's units, never 0.5: 128 of 256 levels, or 512 of 1024
         float kr;             // the clip's own luma coefficients, from its YCbCr matrix tag
         float kb;
         float eased;
