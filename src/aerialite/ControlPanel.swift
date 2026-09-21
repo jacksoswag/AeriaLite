@@ -23,6 +23,93 @@ private struct Tile: View {
     }
 }
 
+/// A slider whose track is glass. macOS 27 draws the unfilled part of Slider's track as a flat,
+/// opaque grey, which on a popover that is itself glass reads as a bar painted over the panel.
+/// Nothing in SwiftUI styles that track, so this is the whole control: a glass capsule, a solid
+/// fill up to the value, and a thumb, with the drag arithmetic done here rather than by AppKit.
+private struct GlassSlider: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var step: Double? = nil
+    var onEditingChanged: (Bool) -> Void = { _ in }
+    @Environment(\.isEnabled) private var enabled
+    @State private var editing = false
+    private static let thumb: CGFloat = 20, track: CGFloat = 5, tick: CGFloat = 2
+
+    var body: some View {
+        GeometryReader { geometry in
+            let travel = max(1, geometry.size.width - GlassSlider.thumb)
+            let fraction = CGFloat(placed(value))
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular, in: Capsule())
+                    .frame(height: GlassSlider.track)
+                    .padding(.horizontal, GlassSlider.thumb / 2)
+                Capsule()
+                    .fill(Color.primary.opacity(0.85))
+                    .frame(width: fraction * travel + GlassSlider.thumb / 2, height: GlassSlider.track)
+                    .padding(.leading, GlassSlider.thumb / 2)
+                Circle()
+                    .fill(.white)
+                    .shadow(color: .black.opacity(0.35), radius: 1.5, y: 1)
+                    .frame(width: GlassSlider.thumb, height: GlassSlider.thumb)
+                    .offset(x: fraction * travel)
+                    .animation(editing ? nil : .easeOut(duration: 0.12), value: fraction)
+            }
+            .frame(height: GlassSlider.thumb)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { drag in
+                    if !editing { editing = true; onEditingChanged(true) }
+                    let at = (drag.location.x - GlassSlider.thumb / 2) / travel
+                    value = snapped(range.lowerBound + Double(min(1, max(0, at))) * span)
+                }
+                .onEnded { _ in editing = false; onEditingChanged(false) })
+        }
+        .frame(height: GlassSlider.thumb)
+        .overlay(alignment: .bottom) { if let step { ticks(every: step) } }
+        .opacity(enabled ? 1 : 0.4)
+        .accessibilityElement()
+        .accessibilityValue(Text(String(format: "%.2f", value)))
+        .accessibilityAdjustableAction { direction in
+            let by = step ?? span / 20
+            value = snapped(min(range.upperBound, max(range.lowerBound,
+                                                       value + (direction == .increment ? by : -by))))
+        }
+    }
+
+    private var span: Double { max(range.upperBound - range.lowerBound, .ulpOfOne) }
+
+    private func placed(_ v: Double) -> Double {
+        min(1, max(0, (v - range.lowerBound) / span))
+    }
+
+    /// The landing snaps to the step grid the way a stepped Slider's does; the drag itself is
+    /// never coarser than the pointer.
+    private func snapped(_ v: Double) -> Double {
+        guard let step, step > 0 else { return v }
+        return range.lowerBound + ((v - range.lowerBound) / step).rounded() * step
+    }
+
+    /// The tick row a stepped Slider draws under its track, kept so the speed grid stays legible.
+    private func ticks(every step: Double) -> some View {
+        Canvas { context, size in
+            let count = Int((span / step).rounded())
+            guard count > 0 else { return }
+            let travel = size.width - GlassSlider.thumb
+            for index in 0...count {
+                let x = GlassSlider.thumb / 2 + travel * CGFloat(index) / CGFloat(count)
+                let dot = CGRect(x: x - GlassSlider.tick / 2, y: size.height - GlassSlider.tick,
+                                 width: GlassSlider.tick, height: GlassSlider.tick)
+                context.fill(Path(ellipseIn: dot), with: .color(.primary.opacity(0.25)))
+            }
+        }
+        .frame(height: GlassSlider.thumb + 6)
+        .allowsHitTesting(false)
+    }
+}
+
 /// One catalogue row: a star and a download toggle, both revealed on hover unless already set.
 private struct Row: View {
     let entry: Entry
@@ -294,13 +381,13 @@ struct ControlPanel: View {
                 Text(remaining(total - shown))
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
             }
-            // no step: a stepped Slider draws a tick track, and seek() already snaps the landing
-            // to the keyframe grid, so quantising the thumb as well only buys ticks
-            Slider(value: Binding(get: { min(shown, total) }, set: { scrubbing = $0 }),
-                   in: 0...total,
-                   onEditingChanged: { editing in
-                       if !editing, let target = scrubbing { state.seek(to: target); scrubbing = nil }
-                   })
+            // no step: seek() already snaps the landing to the keyframe grid, so quantising the
+            // thumb as well only buys ticks
+            GlassSlider(value: Binding(get: { min(shown, total) }, set: { scrubbing = $0 }),
+                        range: 0...total,
+                        onEditingChanged: { editing in
+                            if !editing, let target = scrubbing { state.seek(to: target); scrubbing = nil }
+                        })
         }
         .disabled(!state.running || state.status.duration <= 0)
     }
@@ -319,7 +406,7 @@ struct ControlPanel: View {
                 Text(speedLabel)
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
             }
-            Slider(value: $state.speed, in: 0.125...5, step: 0.125)
+            GlassSlider(value: $state.speed, range: 0.125...5, step: 0.125)
         }
         .disabled(!state.running)
     }
