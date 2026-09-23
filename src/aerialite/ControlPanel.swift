@@ -1,18 +1,19 @@
 import SwiftUI
 
 /// Transport control. Bare until hovered; `tint` carries the button's state, `hover` fills behind.
+/// `glyph` stands in for the SF Symbol where there is none, as for Spotify's mark.
 private struct Tile: View {
     let symbol: String
     var tint: Color = .primary
     var hover: Color = .gray
     var size: CGFloat = 12
+    var glyph: AnyView? = nil
     let action: () -> Void
     @State private var over = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: size, weight: .medium))
+            (glyph ?? AnyView(Image(systemName: symbol).font(.system(size: size, weight: .medium))))
                 .foregroundStyle(tint)
                 .frame(width: 30, height: 24)
                 .background(RoundedRectangle(cornerRadius: 5).fill(over ? hover.opacity(0.22) : .clear))
@@ -107,6 +108,31 @@ private struct GlassSlider: View {
         }
         .frame(height: GlassSlider.thumb + 6)
         .allowsHitTesting(false)
+    }
+}
+
+/// Spotify's mark: a disc with three arcs knocked out of it, widest on top, each drooping a little
+/// further on the right. Drawn rather than bundled so it tints like the SF Symbols beside it.
+private struct SpotifyMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        let side = min(rect.width, rect.height)
+        let origin = CGPoint(x: rect.midX - side / 2, y: rect.midY - side / 2)
+        func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: origin.x + x * side, y: origin.y + y * side)
+        }
+        var mark = Path(ellipseIn: CGRect(origin: origin, size: CGSize(width: side, height: side)))
+        let arcs: [(CGPoint, CGPoint, CGPoint, CGFloat)] = [
+            (at(0.21, 0.37), at(0.50, 0.22), at(0.80, 0.41), 0.105),
+            (at(0.25, 0.54), at(0.50, 0.42), at(0.75, 0.57), 0.085),
+            (at(0.29, 0.70), at(0.50, 0.61), at(0.70, 0.72), 0.070),
+        ]
+        for (from, control, to, width) in arcs {
+            var arc = Path()
+            arc.move(to: from)
+            arc.addQuadCurve(to: to, control: control)
+            mark.addPath(arc.strokedPath(StrokeStyle(lineWidth: width * side, lineCap: .round)))
+        }
+        return mark
     }
 }
 
@@ -257,6 +283,15 @@ struct ControlPanel: View {
                     .help("Native wallpaper extension is not responding")
             }
             Spacer()
+            // The icon is where the button goes, not where the desktop is: Spotify's mark while
+            // the film plays, the Movies-folder film strip while Spotify is up. A little more room
+            // on its right than the filter has, as the power button has beside the gear.
+            Tile(symbol: "film", hover: state.backdrop == .film ? .green : .gray, size: 12,
+                 glyph: state.backdrop == .film
+                    ? AnyView(SpotifyMark().fill(style: FillStyle(eoFill: true)).frame(width: 13, height: 13))
+                    : nil) { state.toggleBackdrop() }
+                .help(state.backdrop == .film ? "Show Spotify's Liquify background" : "Back to the film")
+                .padding(.trailing, 6)
             Menu {
                 ForEach(Filter.allCases) { option in
                     Toggle(option.rawValue, isOn: Binding(
@@ -352,18 +387,23 @@ struct ControlPanel: View {
         return 0
     }
 
+    /// Transport, position and speed all address the film, which is parked while Spotify is up.
+    private var spotify: Bool { state.backdrop == .spotify }
+
     private var transport: some View {
         HStack(spacing: 3) {
             Tile(symbol: "shuffle", tint: state.shuffle ? .accentColor : .primary) {
                 state.shuffle.toggle()
             }
             Tile(symbol: "backward.end.fill") { state.previous() }
+                .disabled(spotify).opacity(spotify ? 0.35 : 1)
             Tile(symbol: state.paused ? "play.fill" : "pause.fill",
                  tint: state.paused ? .primary : .green, hover: .green) { state.paused.toggle() }
             Tile(symbol: state.running ? "stop.fill" : "power",
                  tint: state.running ? .red : .green,
                  hover: state.running ? .red : .green) { state.running.toggle() }
             Tile(symbol: "forward.end.fill") { state.next() }
+                .disabled(spotify).opacity(spotify ? 0.35 : 1)
             Tile(symbol: "repeat.1", tint: state.repeatOne ? .accentColor : .primary) {
                 state.repeatOne.toggle()
             }
@@ -389,7 +429,7 @@ struct ControlPanel: View {
                             if !editing, let target = scrubbing { state.seek(to: target); scrubbing = nil }
                         })
         }
-        .disabled(!state.running || state.status.duration <= 0)
+        .disabled(!state.running || spotify || state.status.duration <= 0)
     }
 
     /// Signed, because the figure counts down rather than up.
@@ -408,7 +448,7 @@ struct ControlPanel: View {
             }
             GlassSlider(value: $state.speed, range: 0.125...5, step: 0.125)
         }
-        .disabled(!state.running)
+        .disabled(!state.running || spotify)
     }
 
     private var speedLabel: String {

@@ -90,6 +90,8 @@ struct Catalog: Codable {
     /// The filter the panel was left on, so a relaunch comes back to the same queue. Lives here
     /// rather than in config.json, which is hand-edited and never written back.
     var view: Set<Filter> = [.all]
+    /// Film or Spotify, as the panel's toggle last left it, so the desktop survives a relaunch.
+    var backdrop: NativeIPC.Backdrop = .film
 
     init() {}
 
@@ -102,6 +104,7 @@ struct Catalog: Codable {
         let names = try c.decodeIfPresent([String].self, forKey: .view) ?? []
         view = Set(names.compactMap(Filter.named))
         if view.isEmpty { view = [.all] }
+        backdrop = (try? c.decodeIfPresent(NativeIPC.Backdrop.self, forKey: .backdrop)) ?? .film
     }
 
     static func load() -> Catalog {

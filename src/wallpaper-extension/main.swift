@@ -99,10 +99,21 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     private var command: NativeIPC.Command?
     private var actionRevision: UInt64 = 0
     private var cursor = 0
+    private let mirror: LiquifyMirror
+    /// Whether the desktop is Liquify's Spotify background rather than the film. The film is
+    /// parked underneath, paused where it was, rather than unloaded, so going back resumes it.
+    private var showingMirror = false
+    /// When the clip left behind by a switch to Spotify stops: after the blend away from it, so
+    /// the outgoing side of that blend is still moving footage rather than a still.
+    private var parkAt: CFTimeInterval?
+    /// Pulling from Liquify continues until the blend back to the film has finished with it.
+    private var mirrorUntil: CFTimeInterval = 0
+    private var ticks = 0
 
     @MainActor init() {
         let display = CGMainDisplayID()
         let bounds = CGDisplayBounds(display)
+        mirror = LiquifyMirror.shared
         root = CALayer()
         root.frame = CGRect(origin: .zero, size: bounds.size)
         root.backgroundColor = CGColor(gray: 0, alpha: 1)
@@ -125,7 +136,7 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
                 // During a blend the active deck is already the incoming clip, so the outgoing
                 // one reaching its end — which is what the window was timed against — is not an
                 // advance. It is the transition finishing on schedule.
-                guard let self,
+                guard let self, !self.showingMirror,
                       note.object as? AVPlayerItem === self.decks[self.active].player.currentItem
                 else { return }
                 self.advance(manual: false)
@@ -168,6 +179,7 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     }
 
     @MainActor private func teardown() {
+        mirror.want(self, false)
         poller?.invalidate()
         poller = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
@@ -186,6 +198,7 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     /// does not fall back to a capture of the layer—it leaves whatever was on screen before—so the
     /// frame is decoded separately from the playing asset rather than skipped.
     nonisolated func snapshot() async throws -> WallpaperSnapshot {
+        if let still = await mirrorStill() { return try WallpaperSnapshot(image: still) }
         guard let playing = await currentAsset() else {
             throw NativeWallpaperError.nothingPlaying
         }
@@ -199,6 +212,10 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
         return try WallpaperSnapshot(image: try await generator.image(at: playing.time).image)
     }
 
+    @MainActor private func mirrorStill() -> CGImage? {
+        showingMirror ? mirror.image() : nil
+    }
+
     @MainActor private func currentAsset() -> (asset: AVAsset, time: CMTime, size: CGSize)? {
         let player = decks[active].player
         guard let item = player.currentItem else { return nil }
@@ -210,10 +227,13 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     // MARK: Transport
 
     @MainActor private func tick() {
+        ticks += 1
         if blending, CACurrentMediaTime() > blendDeadline { settleBlend() }
         // Clock interruptions (for example display sleep) are not rendering failures.
-        // Only callbacks that continuously fail to produce frames justify fallback.
-        if let blend, !surrendered, let command, command.running, !command.paused,
+        // Only callbacks that continuously fail to produce frames justify fallback. The mirror
+        // is exempt: Spotify closing leaves it on a still, which is callbacks without frames by
+        // design, not a stalled compositor.
+        if let blend, !surrendered, !showingMirror, let command, command.running, !command.paused,
            decks[active].player.currentItem != nil, blend.isDrawingButNotPresenting {
             surrender(reason: "callbacks-without-frames")
         }
@@ -223,6 +243,14 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
             publishStatus()
             return
         }
+        // Showing the mirror means building the compositor, which is a shader compile, and the
+        // host is awaiting `makeWallpaper` on this first tick. The next one is 200 ms away.
+        if ticks == 1, next.scene == .spotify, blend == nil {
+            publishStatus()
+            return
+        }
+        let wantsMirror = next.scene == .spotify && !surrendered && blendUsable
+        mirror.tune(next.spotify ?? NativeIPC.SpotifyTuning())
 
         if command?.tracks != next.tracks {
             let showing = currentTrack?.id
@@ -232,18 +260,42 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
             } else if !next.tracks.indices.contains(cursor) {
                 cursor = 0
             }
-            if decks[active].player.currentItem == nil, next.running { open(cursor, manual: false) }
+            if decks[active].player.currentItem == nil, next.running, !wantsMirror, !showingMirror {
+                open(cursor, manual: false)
+            }
         } else {
             command = next
         }
 
-        if next.actionRevision != actionRevision {
-            actionRevision = next.actionRevision
-            apply(next.action)
+        if wantsMirror != showingMirror {
+            if wantsMirror {
+                enterMirror(next)
+            } else {
+                // Clicking a clip while Spotify is up switches back and plays that clip in one
+                // command, so the blend goes from the mirror straight into it rather than through
+                // the parked clip first.
+                var asked: Int?
+                if next.actionRevision != actionRevision, case .play(let index)? = next.action {
+                    actionRevision = next.actionRevision
+                    asked = index
+                }
+                leaveMirror(next, playing: asked)
+            }
         }
 
-        if !next.running || next.tracks.isEmpty {
+        if next.actionRevision != actionRevision {
+            actionRevision = next.actionRevision
+            // Transport addresses the film. While Spotify is up there is nothing for it to move,
+            // and replaying it later would jump the clip the moment the film came back.
+            if !showingMirror { apply(next.action) }
+        }
+
+        if !showingMirror, CACurrentMediaTime() > mirrorUntil { mirror.want(self, false) }
+
+        if !next.running || (!showingMirror && next.tracks.isEmpty) {
             idle()
+        } else if showingMirror {
+            holdMirror(next)
         } else {
             // Pausing mid-blend would leave two clips stopped at two different points with a
             // half-drawn frame between them, so the transition lands first and the pause applies
@@ -270,6 +322,7 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     }
 
     @MainActor private func idle() {
+        mirror.want(self, false)
         settleBlend()
         for deck in decks {
             deck.player.pause()
@@ -326,7 +379,7 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     /// window closes. The lead is measured in the clip's own time, so a rate other than 1 still
     /// spends the configured number of wall-clock seconds blending.
     @MainActor private func tail(_ deck: Int) {
-        guard deck == active, !blending, let command,
+        guard deck == active, !blending, !showingMirror, let command,
               command.running, !command.paused, command.blend.isEnabled, blend != nil else { return }
         let player = decks[deck].player
         guard let item = player.currentItem, item.status == .readyToPlay else { return }
@@ -495,6 +548,112 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
         return made
     }
 
+    // MARK: Spotify
+
+    /// Blends from the film into Liquify's background with the rotation's own transition, and
+    /// parks the clip once the blend has finished with it.
+    @MainActor private func enterMirror(_ next: NativeIPC.Command) {
+        settleBlend()
+        guard let blend = compositor() else { return }
+        showingMirror = true
+        mirror.want(self, next.running && !next.paused)
+        remember()
+        let config = next.blend
+        if next.running, !next.paused, config.isEnabled {
+            blend.begin(into: .mirror(mirror), config: config)
+            parkAt = CACurrentMediaTime() + config.seconds + Blend.primingGrace + 0.2
+        } else {
+            blend.show(feed: .mirror(mirror))
+            park()
+        }
+        showActiveDeck()
+    }
+
+    /// The film comes back where it stopped: the parked clip, resumed, or — when this process
+    /// was restarted while Spotify was up — the same clip reopened at the remembered moment.
+    @MainActor private func leaveMirror(_ next: NativeIPC.Command, playing asked: Int?) {
+        showingMirror = false
+        parkAt = nil
+        let config = next.blend
+        let animated = next.running && !next.paused && config.isEnabled
+        mirrorUntil = CACurrentMediaTime() + (animated ? config.seconds + Blend.primingGrace + 0.5 : 0)
+        guard let blend = compositor() else { return showActiveDeck() }
+
+        let deck = decks[active]
+        if asked == nil, deck.player.currentItem != nil, let output = deck.output {
+            if next.running, !next.paused { deck.player.playImmediately(atRate: Float(next.speed)) }
+            if animated { blend.begin(into: .video(output), config: config) } else { blend.show(output) }
+            return showActiveDeck()
+        }
+
+        let resume = NativeIPC.readResume()
+        let index = asked
+            ?? resume.flatMap { saved in next.tracks.firstIndex { $0.id == saved.id } }
+            ?? cursor
+        reopen(index, at: asked == nil ? resume?.position : nil, animated: animated, using: blend)
+    }
+
+    /// Opens a clip as the thing the mirror blends into. When the parked clip is still loaded it
+    /// is the outgoing deck of an ordinary clip blend, so settling the blend retires it as usual.
+    @MainActor private func reopen(_ index: Int, at seconds: Double?, animated: Bool, using blend: Blend) {
+        guard let command, command.tracks.indices.contains(index) else { return showActiveDeck() }
+        let url = URL(fileURLWithPath: command.tracks[index].path)
+        guard FileManager.default.isReadableFile(atPath: url.path) else { return showActiveDeck() }
+        cursor = index
+        let from = active
+        let into = decks[from].player.currentItem == nil ? from : 1 - from
+        decks[into].load(url, tapped: true)
+        if let seconds, seconds > 0 {
+            decks[into].player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
+                                    toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        if command.running, !command.paused {
+            decks[into].player.playImmediately(atRate: Float(command.speed))
+        }
+        active = into
+        guard let output = decks[into].output else { return showActiveDeck() }
+        if animated {
+            if into != from {
+                blending = true
+                blendDeadline = CACurrentMediaTime() + command.blend.seconds + Blend.primingGrace + 0.5
+            }
+            blend.begin(into: .video(output), config: command.blend)
+        } else {
+            if into != from { decks[from].clear() }
+            blend.show(output)
+        }
+        showActiveDeck()
+    }
+
+    @MainActor private func holdMirror(_ next: NativeIPC.Command) {
+        mirror.want(self, !next.paused)
+        if let parkAt, CACurrentMediaTime() >= parkAt { park() }
+        if next.paused {
+            blend?.settleNow()
+            park()
+            blend?.suspend()
+        } else {
+            blend?.resume()
+            blend?.revive()
+        }
+        showActiveDeck()
+    }
+
+    @MainActor private func park() {
+        parkAt = nil
+        for deck in decks { deck.player.pause() }
+        remember()
+    }
+
+    /// Written on the way into Spotify and again when the clip is parked, which is the moment
+    /// it actually stops.
+    @MainActor private func remember() {
+        let player = decks[active].player
+        guard let track = currentTrack, player.currentItem != nil else { return }
+        let position = player.currentTime().seconds
+        NativeIPC.write(NativeIPC.Resume(id: track.id, position: position.isFinite ? position : 0))
+    }
+
     @MainActor private func advancePastUnreadable() {
         guard let command, command.tracks.count > 1 else {
             settleBlend()
@@ -514,7 +673,11 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     @MainActor private func publishStatus() {
         let player = decks[active].player
         guard let track = currentTrack, let item = player.currentItem else {
-            NativeIPC.write(NativeIPC.Status(heartbeat: Date()))
+            NativeIPC.write(NativeIPC.Status(heartbeat: Date(), renderer: [
+                "backdrop": showingMirror ? "spotify" : "film",
+                "mirror": mirror.stateLabel,
+                "mirrorFrames": String(mirror.framesReceived)
+            ]))
             return
         }
         let duration = item.duration.seconds
@@ -537,7 +700,10 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
                 "blendsRendered": String(blend?.blendsRendered ?? 0),
                 "revivals": String(blend?.revivals ?? 0),
                 "depth": String(blend?.depth ?? 0),
-                "blending": String(blending)
+                "blending": String(blending),
+                "backdrop": showingMirror ? "spotify" : "film",
+                "mirror": mirror.stateLabel,
+                "mirrorFrames": String(mirror.framesReceived)
             ]
         ))
     }

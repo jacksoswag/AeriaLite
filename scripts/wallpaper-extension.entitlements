@@ -4,6 +4,8 @@
 <dict>
   <key>com.apple.security.app-sandbox</key><true/>
   <key>com.apple.security.network.client</key><true/>
+  <!-- Liquify connects in over loopback to hand over its Spotify background; see LiquifyMirror. -->
+  <key>com.apple.security.network.server</key><true/>
   <key>com.apple.security.cs.disable-library-validation</key><true/>
   <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
   <array><string>/Users/Shared/AeriaLite/</string></array>

@@ -14,6 +14,7 @@ import Combine
     @Published private(set) var status = NativeIPC.Status()
     @Published private(set) var progress: [String: Double] = [:]
     @Published private(set) var encoding: Set<String> = []
+    @Published private(set) var backdrop = NativeIPC.Backdrop.film
 
     private(set) var settings = Settings()
     private var ticker: Timer?
@@ -48,7 +49,7 @@ import Combine
     var rows: [Entry] { catalog.rows(filters) }
     var canStream: Bool { settings.streamMode > 0 }
     var nativeBackendLive: Bool { status.isLive }
-    func isPlaying(_ entry: Entry) -> Bool { entry.id == status.id }
+    func isPlaying(_ entry: Entry) -> Bool { backdrop == .film && entry.id == status.id }
 
     init() {
         Paths.migrateToSharedStorage()
@@ -59,6 +60,7 @@ import Combine
         catalog = Catalog.load()
         Migration.run(into: &catalog)
         filters = settings.openingView ?? catalog.view
+        backdrop = catalog.backdrop
         catalog.save()
         pushPlaylist()
 
@@ -154,12 +156,31 @@ import Combine
 
     // MARK: playback commands
 
+    /// Film to Spotify and back. The extension blends between them with the rotation's own
+    /// transition and resumes the film where it stopped.
+    func toggleBackdrop() {
+        setBackdrop(backdrop == .film ? .spotify : .film)
+        publish()
+    }
+
+    /// Unpublished, so a caller that also sends an action lands both in one command snapshot.
+    private func setBackdrop(_ next: NativeIPC.Backdrop) {
+        guard backdrop != next else { return }
+        backdrop = next
+        catalog.backdrop = next
+        catalog.save()
+    }
+
     func play(_ entry: Entry) {
+        // Picking a clip while Spotify is up means wanting the film back, with that clip.
+        let leaving = backdrop == .spotify
+        setBackdrop(.film)
         if let index = playlist().firstIndex(where: { $0.0.id == entry.id }) {
             send(.play(index))
             if settings.streamMode == 2 { ensureLocal(entry) }
             return
         }
+        if leaving { publish() }
         guard settings.streamMode > 0 else { return }
         wanted = entry.id
         ensureLocal(entry)
@@ -168,8 +189,18 @@ import Combine
     func previous() { send(.previous) }
     func next() { send(.next) }
     func seek(to seconds: Double) { send(.seek(seconds)) }
-    func openConfig() { NSWorkspace.shared.open(Paths.config) }
-    func openCatalogFile() { NSWorkspace.shared.open(Paths.catalog) }
+    func openConfig() { edit(Paths.config) }
+    func openCatalogFile() { edit(Paths.catalog) }
+
+    /// macOS only lets the active app bring another to the front, and a menu bar agent is never
+    /// the active app unless it asks to be. Without this the editor receives the file and opens it
+    /// behind everything, which from here looks exactly like the button doing nothing.
+    private func edit(_ file: URL) {
+        NSApp.activate()
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.open(file, configuration: configuration)
+    }
     func startPolling() { refresh() }
     func stopPolling() {}
 
@@ -201,7 +232,9 @@ import Combine
             speed: speed,
             repeatOne: repeatOne,
             shuffle: shuffle,
-            transition: settings.transition
+            transition: settings.transition,
+            backdrop: backdrop,
+            spotify: settings.spotifyTuning
         ))
     }
 

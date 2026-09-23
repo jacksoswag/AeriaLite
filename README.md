@@ -111,9 +111,16 @@ aerialite prep <input> [-o out] [--keep 0-1] [--size WxH] [--bitrate BPS] [--key
                   "spread": 0.7, "stagger": 0.35, "chroma": 0.3, "manual": true },
   "streamMode": 1,
   "defaultView": "Favorites",
-  "defSpeed": 1
+  "defSpeed": 1,
+  "spotify_blur_multiplier": 1,
+  "spotify_distortion_multiplier": 1,
+  "spotify_speed_multiplier": 1
 }
 ```
+
+The three `spotify_*` multipliers (0 to 10) scale Liquify's Blur, Distortion and Motion speed for the
+desktop's Spotify background only; Spotify's own window keeps the settings as they are. They take
+effect the next time the panel opens.
 
 `framesKept` is a fraction of the source's own frames, so `0.5` halves a 239.76fps master to 119.88 without touching duration or speed. `resolution` is `native`, `1080p` or `4k`; native means the display's backing store, which on a scaled Retina panel is neither the point size nor the panel size. A `bitrate` of 0 or absent matches the source's own bits per pixel.
 

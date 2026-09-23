@@ -60,6 +60,11 @@ struct Settings: Codable {
     /// Filter names the panel opens on every launch. Empty leaves it on whatever view was last
     /// used, which the catalogue remembers.
     var defaultView: [String] = []
+    /// Multipliers on Liquify's own Blur, Distortion and Motion speed, for the desktop's copy of
+    /// the Spotify background only; Spotify keeps its settings as they are. Clamped to 0...10.
+    var spotifyBlur = 1.0
+    var spotifyDistortion = 1.0
+    var spotifySpeed = 1.0
     static let slowBitsPerSecond = 5_000_000.0
 
     /// nil when unset or when nothing in it names a real filter, which is what lets the caller
@@ -67,6 +72,19 @@ struct Settings: Codable {
     var openingView: Set<Filter>? {
         let picked = Set(defaultView.compactMap(Filter.named))
         return picked.isEmpty ? nil : picked
+    }
+
+    var spotifyTuning: NativeIPC.SpotifyTuning {
+        .init(blur: spotifyBlur, distortion: spotifyDistortion, speed: spotifySpeed)
+    }
+
+    /// Spelled as asked for rather than in this file's camelCase: they are the three keys meant
+    /// to be found and edited by name.
+    private enum CodingKeys: String, CodingKey {
+        case streams, downloads, defSpeed, maxCache, streamMode, transition, defaultView
+        case spotifyBlur = "spotify_blur_multiplier"
+        case spotifyDistortion = "spotify_distortion_multiplier"
+        case spotifySpeed = "spotify_speed_multiplier"
     }
 
     init() {}
@@ -79,6 +97,12 @@ struct Settings: Codable {
         maxCache = try c.decodeIfPresent(Cache.self, forKey: .maxCache) ?? maxCache
         streamMode = try c.decodeIfPresent(Int.self, forKey: .streamMode) ?? streamMode
         transition = try c.decodeIfPresent(Transition.self, forKey: .transition) ?? transition
+        func multiplier(_ key: CodingKeys) -> Double {
+            min(10, max(0, (try? c.decodeIfPresent(Double.self, forKey: key)) ?? 1))
+        }
+        spotifyBlur = multiplier(.spotifyBlur)
+        spotifyDistortion = multiplier(.spotifyDistortion)
+        spotifySpeed = multiplier(.spotifySpeed)
         // one name or several, since a single view is the common case and quoting it as a bare
         // string is what anyone hand-editing this reaches for first
         if let one = try? c.decodeIfPresent(String.self, forKey: .defaultView) { defaultView = [one] }

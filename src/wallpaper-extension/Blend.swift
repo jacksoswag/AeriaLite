@@ -51,9 +51,19 @@ import simd
     private var link: CVDisplayLink?
     private var renderSignal: DispatchSourceUserDataAdd?
 
+    /// Where a side of the blend gets its pictures: a playing clip, or Liquify's Spotify background.
+    /// The mirror goes through exactly the same window, curve and per-pixel schedule as a change
+    /// of clip, so switching between the two is the same blend the rotation already uses.
+    enum Feed {
+        case video(AVPlayerItemVideoOutput)
+        case mirror(LiquifyMirror)
+    }
+
     /// The clip on screen, and — only while a transition runs — the clip replacing it.
-    private var primary: AVPlayerItemVideoOutput?
-    private var incoming: AVPlayerItemVideoOutput?
+    private var primary: Feed?
+    private var incoming: Feed?
+    /// The last mirror frame taken, so a frame is uploaded once rather than every display tick.
+    private var mirrorSeen: UInt64 = 0
     private var heldPrimary: Frame?
     private var heldIncoming: Frame?
     private var run: Run?
@@ -74,8 +84,11 @@ import simd
 
     // Immutable decoder surfaces, read by the GPU and retained through its completion callback.
     private struct Frame: @unchecked Sendable {
-        let keep: [CVMetalTexture]     // the cache hands back wrappers the textures' lives depend on
-        let buffer: CVPixelBuffer      // carries the colour tags the layer has to be given
+        let keep: [AnyObject]          // the cache hands back wrappers the textures' lives depend on
+        let buffer: CVPixelBuffer?     // carries the colour tags the layer has to be given; nil for the mirror
+        /// A mirror frame: already RGB, in `luma`, and sRGB, which is what the aerials' 709
+        /// primaries with an sRGB transfer function amount to.
+        var rgb = false
         let luma: MTLTexture
         let chroma: MTLTexture
         let size: CGSize
@@ -196,21 +209,35 @@ import simd
     /// Switch the clip on screen with no transition. The previous frame stays up until the new
     /// clip actually decodes one, so a cut is a cut rather than a cut through black.
     func show(_ output: AVPlayerItemVideoOutput?) {
+        show(feed: output.map(Feed.video))
+    }
+
+    func show(feed: Feed?) {
         finishRun()
-        primary = output
+        primary = feed
+        watch(feed)
         needsDraw = true
-        drive(output != nil)
+        drive(feed != nil)
     }
 
     /// Begin a transition from whatever is on screen into `output`.
     func begin(into output: AVPlayerItemVideoOutput, config: Transition) {
-        guard config.isEnabled, heldPrimary != nil else { return show(output) }
+        begin(into: .video(output), config: config)
+    }
+
+    func begin(into feed: Feed, config: Transition) {
+        guard config.isEnabled, heldPrimary != nil else { return show(feed: feed) }
         finishRun()
-        incoming = output
+        incoming = feed
+        watch(feed)
         heldIncoming = nil
         run = Run(config: config, opened: CACurrentMediaTime())
         needsDraw = true
         drive(true)
+    }
+
+    private func watch(_ feed: Feed?) {
+        if case .mirror(let mirror)? = feed { mirrorSeen = mirror.baseline }
     }
 
     /// Stops drawing without forgetting anything. A `CAMetalLayer` keeps showing its last
@@ -325,7 +352,10 @@ import simd
         // display is actually running. Nothing here assumes sRGB, 709, or anything else.
         if !tagged {
             tagged = true
-            if let attachments = CVBufferCopyAttachments(showing.buffer, .shouldPropagate),
+            if showing.rgb {
+                layer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+            } else if let buffer = showing.buffer,
+               let attachments = CVBufferCopyAttachments(buffer, .shouldPropagate),
                let declared = CVImageBufferCreateColorSpaceFromAttachments(attachments)?
                    .takeRetainedValue() {
                 layer.colorspace = declared
@@ -368,20 +398,25 @@ import simd
         needsDraw = false
         let target = CGSize(width: drawable.texture.width, height: drawable.texture.height)
         let style = current.map { styleCode($0.config.style) } ?? 0
+        // One set of YCbCr constants serves both sides, so it comes from whichever side is video.
+        // The mirror has none to offer.
+        let video = showing.rgb ? (arriving ?? showing) : showing
         var uniforms = Uniforms(
             uvScaleA: fill(showing.size, into: target),
             uvScaleB: fill((arriving ?? showing).size, into: target),
-            lumaScale: showing.lumaScale,
-            lumaBias: showing.lumaBias,
-            chromaScale: showing.chromaScale,
-            chromaBias: showing.chromaBias,
-            kr: showing.kr,
-            kb: showing.kb,
+            lumaScale: video.lumaScale,
+            lumaBias: video.lumaBias,
+            chromaScale: video.chromaScale,
+            chromaBias: video.chromaBias,
+            kr: video.kr,
+            kb: video.kb,
             eased: Float(current?.config.progress(at: progress) ?? 0),
             spread: Float(current?.config.spread ?? 0),
             stagger: Float(current?.config.stagger ?? 0),
             chroma: Float(current?.config.chroma ?? 0),
-            style: Float(style)
+            style: Float(style),
+            rgbA: showing.rgb ? 1 : 0,
+            rgbB: (arriving ?? showing).rgb ? 1 : 0
         )
 
         func encode(_ state: MTLRenderPipelineState, into texture: MTLTexture,
@@ -457,6 +492,35 @@ import simd
     }
 
     // MARK: frames
+
+    private func pull(_ feed: Feed, at host: CFTimeInterval) -> Frame? {
+        switch feed {
+        case .video(let output): return pull(output, at: host)
+        case .mirror(let mirror): return pull(mirror)
+        }
+    }
+
+    /// Liquify's frame is a small sRGB image — a quarter of the display in points, the same
+    /// backing size Liquify gives its own canvas — and the shader's linear sample is the upscale,
+    /// as the browser's compositor is in Spotify. Uploaded once per new frame; the frames are
+    /// sparse enough that a fresh texture each time costs less than managing a ring of them.
+    private func pull(_ mirror: LiquifyMirror) -> Frame? {
+        guard let latest = mirror.latest, latest.seq > mirrorSeen else { return nil }
+        mirrorSeen = latest.seq
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm, width: latest.width, height: latest.height, mipmapped: false)
+        descriptor.usage = .shaderRead
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        latest.pixels.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            texture.replace(region: MTLRegionMake2D(0, 0, latest.width, latest.height),
+                            mipmapLevel: 0, withBytes: base, bytesPerRow: latest.width * 4)
+        }
+        return Frame(keep: [texture], buffer: nil, rgb: true, luma: texture, chroma: texture,
+                     size: CGSize(width: latest.width, height: latest.height),
+                     lumaScale: 1, lumaBias: 0, chromaScale: 1, chromaBias: 0.5,
+                     kr: 0.2126, kb: 0.0722)
+    }
 
     private func pull(_ output: AVPlayerItemVideoOutput, at host: CFTimeInterval) -> Frame? {
         let time = output.itemTime(forHostTime: host)
@@ -540,6 +604,8 @@ import simd
         var stagger: Float
         var chroma: Float
         var style: Float
+        var rgbA: Float
+        var rgbB: Float
     }
 }
 
@@ -589,6 +655,8 @@ extension Blend {
         float stagger;
         float chroma;
         float style;
+        float rgbA;           // 1 where that side is a mirror frame: already RGB, nothing to convert
+        float rgbB;
     };
 
     struct VertexOut {
@@ -620,8 +688,9 @@ extension Blend {
     }
 
     static inline float3 tap(texture2d<float> luma, texture2d<float> chroma, sampler s,
-                             float2 uv, float2 uvScale, constant Uniforms &u) {
+                             float2 uv, float2 uvScale, float rgb, constant Uniforms &u) {
         float2 at = clamp(0.5 + (uv - 0.5) * uvScale, 0.0, 1.0);
+        if (rgb > 0.5) return luma.sample(s, at).rgb;
         return ycbcr(luma.sample(s, at).r, chroma.sample(s, at).rg, u);
     }
 
@@ -653,7 +722,7 @@ extension Blend {
                                   texture2d<float> chromaB [[texture(3)]],
                                   constant Uniforms &u [[buffer(0)]]) {
         constexpr sampler smooth(filter::linear, mip_filter::none, address::clamp_to_edge);
-        return float4(tap(lumaA, chromaA, smooth, in.uv, u.uvScaleA, u), 1.0);
+        return float4(tap(lumaA, chromaA, smooth, in.uv, u.uvScaleA, u.rgbA, u), 1.0);
     }
 
     /// Written once per transition, then read every frame: rgb is each channel's own distance
@@ -665,8 +734,8 @@ extension Blend {
                                    texture2d<float> chromaB [[texture(3)]],
                                    constant Uniforms &u [[buffer(0)]]) {
         constexpr sampler smooth(filter::linear, mip_filter::none, address::clamp_to_edge);
-        float3 a = toLinear(tap(lumaA, chromaA, smooth, in.uv, u.uvScaleA, u));
-        float3 b = toLinear(tap(lumaB, chromaB, smooth, in.uv, u.uvScaleB, u));
+        float3 a = toLinear(tap(lumaA, chromaA, smooth, in.uv, u.uvScaleA, u.rgbA, u));
+        float3 b = toLinear(tap(lumaB, chromaB, smooth, in.uv, u.uvScaleB, u.rgbB, u));
         float3 apart = abs(a - b);
         // Weighted rather than a plain RGB distance: a pixel that differs only in blue is a pixel
         // that barely differs, and scheduling it as though it were a large change would waste the
@@ -684,8 +753,8 @@ extension Blend {
                                    constant Uniforms &u [[buffer(0)]]) {
         constexpr sampler smooth(filter::linear, mip_filter::none, address::clamp_to_edge);
         constexpr sampler exact(filter::nearest, mip_filter::none, address::clamp_to_edge);
-        float3 a = toLinear(tap(lumaA, chromaA, smooth, in.uv, u.uvScaleA, u));
-        float3 b = toLinear(tap(lumaB, chromaB, smooth, in.uv, u.uvScaleB, u));
+        float3 a = toLinear(tap(lumaA, chromaA, smooth, in.uv, u.uvScaleA, u.rgbA, u));
+        float3 b = toLinear(tap(lumaB, chromaB, smooth, in.uv, u.uvScaleB, u.rgbB, u));
 
         if (u.style < 0.5) {
             return float4(toGamma(mix(a, b, u.eased)), 1.0);
