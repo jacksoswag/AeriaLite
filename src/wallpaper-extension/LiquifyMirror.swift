@@ -21,11 +21,8 @@ import QuartzCore
 /// The port is open only while the menu app is: WallpaperAgent keeps this process alive for as
 /// long as AeriaLite is the wallpaper, so the listener follows the app's `agent.lock` instead.
 ///
-///     → {"type":"hello","v":1,"width":W,"height":H,     display size in points,
-///        "blur":b,"distortion":d,"speed":s}              and the desktop-only multipliers
-///     → {"type":"pull"}
-///     ← {"type":"info",...}                             settings, cover, readiness
-///     ← "LQXF" u16 v, u16 flags, u32 w, u32 h, u32 seq, u32 fps, f64 t, then w·h RGBA8 top-down sRGB
+/// The wire protocol (`hello`, `pull`, `info`, the `LQXF` frame header) is defined once, in
+/// Liquify's README under "Mirror frame API".
 @MainActor final class LiquifyMirror {
     static let shared = LiquifyMirror()
     static let port: UInt16 = 47823

@@ -6,8 +6,6 @@ import Foundation
 enum Migration {
     static func run(into catalog: inout Catalog) {
         removeAbandonedWork()
-        adoptLegacyFolder(&catalog)
-        flatten(&catalog)
         adopt(Paths.wallpapers, into: &catalog)
         forgetTransient(&catalog)
         forgetMissing(&catalog)
@@ -24,43 +22,6 @@ enum Migration {
                 && file.lastPathComponent.contains(".aerialite.") {
                 try? FileManager.default.removeItem(at: file)
             }
-        }
-    }
-
-    /// Downloads used to sit in a persistent/ subfolder that meant "never evict". Living in
-    /// wallpapers/ carries that meaning now, so the folder is emptied into its parent and the rows
-    /// addressing it are moved with their files. A name already taken in wallpapers/ is the same
-    /// clip streamed, and the download is the better copy, so it wins.
-    private static func flatten(_ catalog: inout Catalog) {
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: Paths.legacyPersistent,
-                                                      includingPropertiesForKeys: nil) else { return }
-        for file in files where file.pathExtension.lowercased() == "mp4" {
-            let target = Paths.wallpapers.appendingPathComponent(file.lastPathComponent)
-            guard Library.land(file, at: target) else { continue }
-            for entry in catalog.entries where entry.source.path == file.path {
-                var row = entry
-                row.source.path = target.path
-                catalog.replace(row)
-            }
-        }
-        try? fm.removeItem(at: Paths.legacyPersistent)
-    }
-
-    /// The pre-AeriaLite location. Files move rather than copy, so this runs exactly once.
-    private static func adoptLegacyFolder(_ catalog: inout Catalog) {
-        let old = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Wallpapers")
-        guard let files = try? FileManager.default.contentsOfDirectory(at: old, includingPropertiesForKeys: nil)
-        else { return }
-        for file in files where file.pathExtension.lowercased() == "mp4" {
-            let title = Library.title(for: file.deletingPathExtension().lastPathComponent)
-            let target = Paths.wallpapers.appendingPathComponent(Library.slug(for: title))
-                                         .appendingPathExtension("mp4")
-            // A library already committed under the new root wins. Leave the older source in
-            // place for manual recovery instead of overwriting a known-good current download.
-            guard FileManager.default.fileExists(atPath: target.path)
-                    || Library.land(file, at: target) else { continue }
-            claim(title: title, path: target, into: &catalog)
         }
     }
 

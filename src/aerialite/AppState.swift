@@ -52,7 +52,6 @@ import Combine
     func isPlaying(_ entry: Entry) -> Bool { backdrop == .film && entry.id == status.id }
 
     init() {
-        Paths.migrateToSharedStorage()
         Paths.ensure()
         Settings.seedIfMissing()
         settings = Settings.load()

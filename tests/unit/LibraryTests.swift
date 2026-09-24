@@ -144,34 +144,6 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(cache.bytes, 30)
     }
 
-    func testInterruptedStorageMigrationMergesNestedDirectoriesWithoutOverwrite() throws {
-        let folder = try temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let source = folder.appendingPathComponent("old", isDirectory: true)
-        let destination = folder.appendingPathComponent("new", isDirectory: true)
-        let oldWallpapers = source.appendingPathComponent("Wallpapers", isDirectory: true)
-        let newWallpapers = destination.appendingPathComponent("Wallpapers", isDirectory: true)
-        try FileManager.default.createDirectory(at: oldWallpapers, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: newWallpapers, withIntermediateDirectories: true)
-        try Data("old collision".utf8).write(
-            to: oldWallpapers.appendingPathComponent("existing.mp4"))
-        try Data("new collision".utf8).write(
-            to: newWallpapers.appendingPathComponent("existing.mp4"))
-        try Data("recover me".utf8).write(
-            to: oldWallpapers.appendingPathComponent("missing.mp4"))
-
-        Paths.migrateContents(from: source, to: destination)
-
-        XCTAssertEqual(try String(contentsOf: newWallpapers.appendingPathComponent("existing.mp4"),
-                                  encoding: .utf8), "new collision")
-        XCTAssertEqual(try String(contentsOf: newWallpapers.appendingPathComponent("missing.mp4"),
-                                  encoding: .utf8), "recover me")
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: oldWallpapers.appendingPathComponent("existing.mp4").path))
-        XCTAssertFalse(FileManager.default.fileExists(
-            atPath: oldWallpapers.appendingPathComponent("missing.mp4").path))
-    }
-
     func testCatalogNamesStayShortAndAvoidFillerWords() {
         let cases = [
             CatalogNames.title(label: "West Africa to the Alps", shotID: "A001_C004_1207W5"),

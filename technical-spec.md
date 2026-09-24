@@ -232,6 +232,7 @@ being measured.
 | `src/aerialite/NativeIPC.swift` | command/status wire format and atomic files |
 | `src/aerialite/SingleInstance.swift` | advisory lock keeping one agent on the command file |
 | `src/wallpaper-extension/main.swift` | `WallpaperExtension` conformance and video sessions |
+| `src/wallpaper-extension/LiquifyMirror.swift` | loopback server receiving Liquify's Spotify background |
 | `vendor/WallpaperExtensionKit.swiftinterface` | reconstructed declarations for the private framework |
 | `src/aerialite/Library.swift` | resolution, fetch, promotion, conform, eviction |
 | `src/aerialite/Migration.swift` | interrupted-work cleanup and storage reconciliation |
@@ -274,11 +275,19 @@ same files.
 | `playback-command.json` | app-to-extension snapshot |
 | `playback-status.json` | extension-to-app snapshot and heartbeat |
 
-Startup recursively merges the previous Application Support and cache roots without overwriting
-an existing destination file. A cross-volume move copies first, verifies the byte count, and only
-then removes the source. A collision leaves the older source available for manual recovery.
-Legacy `Wallpapers/persistent/` downloads are flattened atomically, and catalogue paths into old
-evictable caches are forgotten while durable or hand-selected paths remain.
+Startup reconciles the catalogue with the disk: abandoned hidden encode files are removed, `.mp4`
+files in `Wallpapers/` that no row points at are adopted, catalogue paths into the evictable cache
+are forgotten, and rows whose file has gone drop back to absent. Durable and hand-selected paths
+remain.
+
+## Spotify backdrop
+
+The desktop can show Liquify's Spotify background instead of the footage. Liquify renders the
+frames inside Spotify and sends them to the extension, which listens on `ws://127.0.0.1:47823/liquify`
+(loopback only). The listener is open only while the menu app holds `agent.lock`
+(`NativeIPC.agentRunning`, checked on a timer), so quitting the app closes the port even though
+WallpaperAgent keeps the extension alive. The wire protocol is defined once, in Liquify's README
+under "Mirror frame API"; `LiquifyMirror.swift` implements the server side of it.
 
 ## Transcoding
 
@@ -296,8 +305,8 @@ download paths.
 
 ## Verification
 
-`swift test` covers invalid-video rejection, atomic replacement, interrupted nested migration,
-stable identity across rename/JSON round trips, cache byte/count behavior, and title constraints.
+`swift test` covers invalid-video rejection, atomic replacement, the `agent.lock` probe that gates
+the Liquify port, stable identity across rename/JSON round trips, cache byte/count behavior, and title constraints.
 `tests/run-tests.sh --smk` creates a deterministic H.264 fixture with AVFoundation, transcodes it,
 and independently verifies the HEVC tag, dimensions, cadence, frame count, and absence of audio.
 It has no Homebrew, `ffmpeg`, or `ffprobe` dependency and returns nonzero on any failed assertion.

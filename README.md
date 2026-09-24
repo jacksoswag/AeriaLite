@@ -42,9 +42,9 @@ It builds with stable Xcode 26 and targets macOS 26. The build stops on unsuppor
 
 Apple's masters are 145 MB for 137 seconds and there are 152 of them, so keeping the catalogue as shipped costs about 22 GB. Two things stop that.
 
-Downloads are conformed on arrival to 1080p at a 2.5 Mbps cap, trimmed at 180 seconds. A measured 15-clip library takes 711 MB, an average of 47 MB a clip.
+Downloads are conformed on arrival to 1080p at a 2.5 Mbps cap, trimmed at 180 seconds. A measured 15-clip library takes 711 MB, an average of 47 MB a clip. Those are the default `downloads` settings; set `resolution` to `native`, `framesKept` to `1` and `bitrate` to `0` and a clip keeps the source's quality, at 250 MB or more each.
 
-Streamed clips are evicted least-recently-used against a byte and count cap, so the on-disk set has a ceiling you set rather than one the catalogue sets. `Wallpapers/` is never evicted and never counted against it. A Download click moves an existing stream—or lands a new fetch—there before transcoding begins, so quitting during a long encode cannot lose it.
+Streamed clips are evicted least-recently-used against a byte and count cap, so the on-disk set has a ceiling you set rather than one the catalogue sets. `Wallpapers/` is never evicted and never counted against it: it is uncapped by design, and its size is what you chose to download at the quality `downloads` asks for. A Download click moves an existing stream—or lands a new fetch—there before transcoding begins, so quitting during a long encode cannot lose it.
 
 ## Install
 
@@ -88,14 +88,15 @@ identity does not match its containing app.
 
 The menu bar icon opens a panel: the playlist with drag reordering, a filter for All / Favorites / Downloaded, transport controls, a position slider that snaps to keyframes, and speed from .12x (an exact 0.125 rate) to 5x. Click a clip to play it, the star to favourite it, the arrow to keep it offline.
 
-Two commands beyond the agent:
+Three commands beyond the agent:
 
 ```bash
 aerialite catalog
 aerialite prep <input> [-o out] [--keep 0-1] [--size WxH] [--bitrate BPS] [--keyframe S] [--max-seconds N]
+aerialite activate-native
 ```
 
-`catalog` imports Apple's aerial manifest as rows with links and nothing downloaded. `prep` is the transcoder the agent shells out to, usable on any file of your own.
+`catalog` imports Apple's aerial manifest as rows with links and nothing downloaded. `prep` is the transcoder the agent shells out to, usable on any file of your own. `activate-native` registers the wallpaper extension and selects it for the desktop and the idle screen; the installer runs it.
 
 ## Configuration
 
@@ -191,21 +192,21 @@ swift test
 ./tests/run-tests.sh --perf   # samples the menu app and native extension separately
 ```
 
-`-gnone` is required on toolchains shipping without `dsymutil`, where a release build otherwise fails at the debug-symbol step. The smoke suite creates and inspects its fixtures with AVFoundation, so it does not require Homebrew, `ffmpeg`, or `ffprobe`. Runs land in `tests/reports/`, which is where every number above comes from.
+`-gnone` is required on toolchains shipping without `dsymutil`, where a release build otherwise fails at the debug-symbol step. The smoke suite creates and inspects its fixtures with AVFoundation, so it does not require Homebrew, `ffmpeg`, or `ffprobe`. Each run overwrites `tests/reports/latest_<suite>.md`, which is where every number above comes from.
 
 ## Layout
 
 ```
-src/aerialite/       menu app, transcoder, catalogue, cache and IPC
-src/wallpaper-extension/  native WallpaperAgent backend
-vendor/              reconstructed WallpaperExtensionKit interface
-scripts/             install.sh, bundle.sh, fetch-aerials.sh, trim.sh, to-av1.sh
-tests/               run-tests.sh --smk --perf, reports/
-scripts/detach-menu-bar-group.py  repairs a menu bar item grouped under another app
-technical-spec.md    native protocol, playback, downloads and storage
+src/aerialite/            menu app, transcoder, catalogue, cache and IPC
+src/wallpaper-extension/  native WallpaperAgent backend and the Liquify mirror
+vendor/                   reconstructed WallpaperExtensionKit interface
+scripts/                  install.sh, bundle.sh, make-icon.swift, astronaut.png,
+                          wallpaper-extension.entitlements, detach-menu-bar-group.py
+tests/                    run-tests.sh --smk --perf, media-helper.swift, unit/, reports/
+technical-spec.md         native protocol, playback, downloads and storage
 ```
 
-[`technical-spec.md`](technical-spec.md) carries the native protocol boundary, atomic download lifecycle, migration rules, and transcoder details.
+[`technical-spec.md`](technical-spec.md) carries the native protocol boundary, atomic download lifecycle, startup reconciliation, the Spotify backdrop, and transcoder details.
 
 ## If the menu bar icon does not appear
 

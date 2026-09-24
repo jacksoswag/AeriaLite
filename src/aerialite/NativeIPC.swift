@@ -14,8 +14,11 @@ enum NativeIPC {
 
     /// Whether the menu app is running: its exclusive lock refuses even a shared probe. A probe
     /// that does get the lock releases it on close, and an agent starting meanwhile retries.
-    static var agentRunning: Bool {
-        let descriptor = open(agentLock.path, O_RDONLY | O_CLOEXEC)
+    static var agentRunning: Bool { isLocked(agentLock) }
+
+    /// Whether another open file description holds an exclusive `flock` on `url`.
+    static func isLocked(_ url: URL) -> Bool {
+        let descriptor = open(url.path, O_RDONLY | O_CLOEXEC)
         guard descriptor >= 0 else { return false }
         defer { close(descriptor) }
         return flock(descriptor, LOCK_SH | LOCK_NB) != 0 && errno == EWOULDBLOCK

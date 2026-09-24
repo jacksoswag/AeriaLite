@@ -148,8 +148,10 @@ case "${1:-}" in
   --perf) mode=perf ;;
   *) echo "usage: run-tests.sh --smk | --perf"; exit 2 ;;
 esac
+trap 'rm -rf "$WORK"; rmdir "$(dirname "$WORK")" 2>/dev/null' EXIT
 setup "$1" || exit $?
-REPORT="$REPORTS/${DATE}_${mode}.md"
+# One report per suite, overwritten each run; git keeps the history.
+REPORT="$REPORTS/latest_${mode}.md"
 exec > >(tee "$REPORT") 2>&1
 echo "# aerialite $1 $DATE"
 echo

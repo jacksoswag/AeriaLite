@@ -1,5 +1,3 @@
 .build/
 output/
-docs/
-.DS_Store
 *.aerialite.mp4

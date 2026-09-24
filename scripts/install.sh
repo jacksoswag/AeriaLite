@@ -6,7 +6,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPS="${APPS:-$HOME/Applications}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
-CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aerialite"
 LABEL="com.jacksonadams.aerialite"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 # Installed under the name the app shows in Finder. ExtensionKit checks that the appex path lies
@@ -37,7 +36,7 @@ if [ -z "$app_team" ] || [ "$app_team" = "not set" ] || [ "$app_team" != "$exten
   echo "set AERIALITE_SIGN_IDENTITY to that Apple Development identity" >&2
   exit 1
 fi
-mkdir -p "$APPS" "$BIN_DIR" "$CONF_DIR"
+mkdir -p "$APPS" "$BIN_DIR"
 
 # Stage the complete signed bundle on the destination volume before disturbing the running copy.
 # A rename then makes the actual replacement atomic.
@@ -98,7 +97,7 @@ ln -sf "$APP/Contents/MacOS/aerialite" "$BIN_DIR/aerialite"
 # from Finder, Spotlight or the login item keeps the item under AeriaLite's own entry.
 rm -f "$PLIST"
 count=$(find "/Users/Shared/AeriaLite/Wallpapers" -name '*.mp4' 2>/dev/null | wc -l | tr -d ' ')
-echo "$APP installed, $count wallpapers, log at $CONF_DIR/aerialite.log"
+echo "$APP installed, $count wallpapers"
 echo "open AeriaLite from Finder or Spotlight to start it; it registers itself as a login item"
-[ "$count" = "0" ] && echo "nothing to play yet: scripts/fetch-aerials.sh, or aerialite prep <file>"
+[ "$count" = "0" ] && echo "nothing to play yet: aerialite catalog, then Download in the panel"
 exit 0
