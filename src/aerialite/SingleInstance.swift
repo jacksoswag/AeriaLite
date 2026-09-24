@@ -14,7 +14,7 @@ enum SingleInstance {
     /// old process has finished its termination handler, so a brief overlap is legitimate handover
     /// rather than a second agent and is waited out instead of refused.
     static func acquire(waiting timeout: TimeInterval = 5) -> Bool {
-        let path = Paths.root.appendingPathComponent("agent.lock").path
+        let path = NativeIPC.agentLock.path
         let descriptor = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
         // A lock that cannot be taken at all must not be what keeps the desktop empty.
         guard descriptor >= 0 else { return true }

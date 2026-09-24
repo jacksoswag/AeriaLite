@@ -18,6 +18,9 @@ import QuartzCore
 /// its timers are throttled to a crawl, but incoming socket messages are still delivered promptly.
 /// It also makes the frame rate this side's decision, taken from the rate Liquify says it wants.
 ///
+/// The port is open only while the menu app is: WallpaperAgent keeps this process alive for as
+/// long as AeriaLite is the wallpaper, so the listener follows the app's `agent.lock` instead.
+///
 ///     → {"type":"hello","v":1,"width":W,"height":H,     display size in points,
 ///        "blur":b,"distortion":d,"speed":s}              and the desktop-only multipliers
 ///     → {"type":"pull"}
@@ -42,6 +45,7 @@ import QuartzCore
     private(set) var listening = false
 
     private var listener: NWListener?
+    private var gate: DispatchSourceTimer?
     private var connection: NWConnection?
     private var wanted = Set<ObjectIdentifier>()
     private var pacer: DispatchSourceTimer?
@@ -59,7 +63,11 @@ import QuartzCore
 
     private init() {
         restore()
-        listen()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .seconds(1), leeway: .milliseconds(200))
+        timer.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.follow() } }
+        timer.resume()
+        gate = timer
     }
 
     /// The frame a source switched to the mirror should start from. While Liquify is connected
@@ -96,6 +104,23 @@ import QuartzCore
 
     // MARK: server
 
+    /// Opens the port while the menu app runs and closes it, with any connection, once it is gone.
+    /// A listener that failed, as when the port is still held by an extension process on its way
+    /// out, is retried on the next check.
+    private func follow() {
+        let present = NativeIPC.agentRunning
+        if present, listener == nil { listen() }
+        guard !present, let listener else { return }
+        listener.cancel()
+        self.listener = nil
+        listening = false
+        connection?.cancel()
+        connection = nil
+        connected = false
+        inFlight = false
+        pace()
+    }
+
     private func listen() {
         let parameters = NWParameters.tcp
         let socket = NWProtocolWebSocket.Options()
@@ -106,7 +131,7 @@ import QuartzCore
         // Loopback only: this is a wallpaper, not a service.
         parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback),
                                                      port: NWEndpoint.Port(rawValue: LiquifyMirror.port)!)
-        guard let made = try? NWListener(using: parameters) else { return retryListen() }
+        guard let made = try? NWListener(using: parameters) else { return }
         made.newConnectionHandler = { [weak self] incoming in
             MainActor.assumeIsolated { self?.accept(incoming) }
         }
@@ -119,23 +144,12 @@ import QuartzCore
                     self.listening = false
                     made.cancel()
                     self.listener = nil
-                    self.retryListen()
                 default: break
                 }
             }
         }
         listener = made
         made.start(queue: .main)
-    }
-
-    /// The port can still be held by an extension process on its way out.
-    private func retryListen() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.listener == nil else { return }
-                self.listen()
-            }
-        }
     }
 
     /// One publisher at a time, and the newest wins: a Spotify that was restarted reconnects

@@ -122,6 +122,10 @@ The three `spotify_*` multipliers (0 to 10) scale Liquify's Blur, Distortion and
 desktop's Spotify background only; Spotify's own window keeps the settings as they are. They take
 effect the next time the panel opens.
 
+Liquify hands those frames to the wallpaper extension over loopback, on `127.0.0.1:47823`. The
+extension listens only while the AeriaLite app is running, going by the app's `agent.lock`, so
+quitting the app closes the port even though macOS keeps the extension alive.
+
 `framesKept` is a fraction of the source's own frames, so `0.5` halves a 239.76fps master to 119.88 without touching duration or speed. `resolution` is `native`, `1080p` or `4k`; native means the display's backing store, which on a scaled Retina panel is neither the point size nor the panel size. A `bitrate` of 0 or absent matches the source's own bits per pixel.
 
 `defaultView` pins the panel to a filter on every launch, one of `All`, `Favorites`, `Downloaded`, or an array of them. Leave the key out and it reopens on whatever view you left it on, which `wallpapers.json` remembers. Either way the view is the queue: a clip filtered out goes off the screen and out of the rotation together.

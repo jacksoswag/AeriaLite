@@ -8,6 +8,18 @@ enum NativeIPC {
     static let command = root.appendingPathComponent("playback-command.json")
     static let status = root.appendingPathComponent("playback-status.json")
     static let resume = root.appendingPathComponent("resume.json")
+    /// Held by the menu app for its whole life (`SingleInstance`) and dropped by the kernel when
+    /// it exits or crashes, so it doubles as the app's presence without a heartbeat to go stale.
+    static let agentLock = root.appendingPathComponent("agent.lock")
+
+    /// Whether the menu app is running: its exclusive lock refuses even a shared probe. A probe
+    /// that does get the lock releases it on close, and an agent starting meanwhile retries.
+    static var agentRunning: Bool {
+        let descriptor = open(agentLock.path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        return flock(descriptor, LOCK_SH | LOCK_NB) != 0 && errno == EWOULDBLOCK
+    }
 
     /// What the desktop shows: the aerial footage, or Liquify's Spotify background mirrored as
     /// Liquify itself renders it.
