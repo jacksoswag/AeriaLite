@@ -25,9 +25,9 @@ XCODE_NUMBER="$(xcodebuild -version | awk '/^Xcode / {
   split($2, parts, "."); printf "%d%d0", parts[1], parts[2]
 }')"
 case "$SDK_VERSION" in
-  26.*) ;;
+  27.*) ;;
   *)
-    echo "aerialite: the native wallpaper backend requires Xcode 26 or newer (found SDK $SDK_VERSION)" >&2
+    echo "aerialite: the native wallpaper backend requires Xcode 27 (found SDK $SDK_VERSION)" >&2
     exit 1
     ;;
 esac
@@ -47,13 +47,13 @@ mkdir -p "$EXT_CONTENTS/MacOS"
 MODULES="$STAGE_ROOT/modules"
 mkdir -p "$MODULES"
 xcrun swift-frontend -compile-module-from-interface \
-  -target "$(uname -m)-apple-macos26.0" -sdk "$SDK" \
+  -target "$(uname -m)-apple-macos27.0" -sdk "$SDK" \
   -F "$SDK/System/Library/PrivateFrameworks" \
   -module-name WallpaperExtensionKit \
   -o "$MODULES/WallpaperExtensionKit.swiftmodule" \
   "$ROOT/vendor/WallpaperExtensionKit.swiftinterface"
 xcrun swiftc -parse-as-library -O -gnone -swift-version 5 -application-extension \
-  -target "$(uname -m)-apple-macos26.0" \
+  -target "$(uname -m)-apple-macos27.0" \
   -I "$MODULES" \
   -F "$SDK/System/Library/PrivateFrameworks" \
   "$ROOT/src/aerialite/NativeIPC.swift" \
@@ -71,7 +71,7 @@ xcrun swiftc -parse-as-library -O -gnone -swift-version 5 -application-extension
 work="$STAGE_ROOT/tools"
 mkdir -p "$work"
 xcrun swiftc -O -gnone -o "$work/make-icon" "$ROOT/scripts/make-icon.swift"
-"$work/make-icon" "$work/icon.png" "$ROOT/scripts/astronaut.png"
+"$work/make-icon" "$work/icon.png" "$work/menu.png"
 
 set -- 16 16 32 32 128 128 256 256 512 512
 mkdir -p "$work/AppIcon.iconset"
@@ -81,8 +81,8 @@ for spec in 16:icon_16x16 32:icon_16x16@2x 32:icon_32x32 64:icon_32x32@2x \
   sips -z "${spec%%:*}" "${spec%%:*}" "$work/icon.png" --out "$work/AppIcon.iconset/${spec##*:}.png" >/dev/null
 done
 iconutil -c icns "$work/AppIcon.iconset" -o "$CONTENTS/Resources/AppIcon.icns"
-# the same silhouette drives the menu bar, loaded as a template so AppKit tints it
-install -m 644 "$ROOT/scripts/astronaut.png" "$CONTENTS/Resources/MenuIcon.png"
+# the same mark drives the menu bar, loaded as a template so AppKit tints it
+install -m 644 "$work/menu.png" "$CONTENTS/Resources/MenuIcon.png"
 
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -109,7 +109,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_VERSION</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>LSMinimumSystemVersion</key><string>27.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
@@ -140,7 +140,7 @@ cat > "$EXT_CONTENTS/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>XPC!</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_VERSION</string>
-  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>LSMinimumSystemVersion</key><string>27.0</string>
   <key>EXAppExtensionAttributes</key>
   <dict>
     <key>EXExtensionPointIdentifier</key><string>com.apple.wallpaper</string>
@@ -157,7 +157,7 @@ codesign "${SIGN_ARGS[@]}" "$APP"
 plutil -lint "$CONTENTS/Info.plist" "$EXT_CONTENTS/Info.plist" >/dev/null
 codesign --verify --deep --strict "$APP"
 if ! xcrun vtool -show-build "$EXT_CONTENTS/MacOS/AeriaLiteWallpaperExtension" \
-    | grep -Eq 'sdk +26\.'; then
+    | grep -Eq 'sdk +27\.'; then
   echo "aerialite: extension was not stamped with a supported macOS SDK" >&2
   exit 1
 fi

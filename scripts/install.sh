@@ -88,7 +88,7 @@ ROLLBACK=0
 rm -rf "$KEEP_DIR"
 ln -sf "$APP/Contents/MacOS/aerialite" "$BIN_DIR/aerialite"
 
-# Deliberately not launched from here. macOS 26 files a menu bar item under the app that is
+# Deliberately not launched from here. macOS 27 files a menu bar item under the app that is
 # responsible for the process that created it, and that grouping is persistent and per-bundle-id.
 # An installer run from a terminal or an agent therefore welds the menu bar item to *that* tool's
 # entry in group.com.apple.controlcenter's trackedApplications, and if the tool is not allowed to

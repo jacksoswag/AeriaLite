@@ -12,6 +12,7 @@ import SwiftUI
     private var outside: Any?           // global mouse monitor, live only while the panel is up
     private var sigterm: DispatchSourceSignal?
     private let state = AppState()
+    private let hotkeys = Hotkeys()
 
     static func run() -> Never {
         let delegate = App()
@@ -43,7 +44,7 @@ import SwiftUI
         // the panel is built on first open, so SwiftUI stays out of the process for anyone who
         // sets an order once and never opens the menu again
         //
-        // Created once and never rebuilt. On macOS 26 a status item is not a window this process
+        // Created once and never rebuilt. On macOS 27 a status item is not a window this process
         // owns: AppKit asks com.apple.controlcenter.statusitems for an FBSScene and exports the
         // button into it, so `button.window` is a detached host that never reports menu bar
         // coordinates and ControlCenter does the placing. Any liveness check written against that
@@ -53,9 +54,10 @@ import SwiftUI
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // Named so macOS remembers wherever it is command-dragged to.
         status.autosaveName = "AeriaLite"
-        status.button?.image = App.helmet
+        status.button?.image = App.mark
         status.button?.target = self
         status.button?.action = #selector(toggle)
+        hotkeys.bind(state.settings.keybinds, to: state)
 
         // A backend that is hosted but not presenting cannot be fixed by publishing at it, so give
         // WallpaperAgent a few seconds to acquire on its own and only then restart it. The delay
@@ -81,10 +83,10 @@ import SwiftUI
         }
     }
 
-    /// The same silhouette the app icon is built from, bundled by scripts/bundle.sh. Marked as a
+    /// The same mark the app icon is drawn with, bundled by scripts/bundle.sh. Marked as a
     /// template so AppKit tints it to whatever the menu bar is doing, which is the only way this
     /// tracks light and dark.
-    private static let helmet: NSImage? = {
+    private static let mark: NSImage? = {
         guard let url = Bundle.main.url(forResource: "MenuIcon", withExtension: "png"),
               let image = NSImage(contentsOf: url) else { return nil }
         image.isTemplate = true
@@ -96,6 +98,7 @@ import SwiftUI
         guard let button = status.button else { return }
         if popover.isShown { return dismiss() }
         state.reload()
+        hotkeys.bind(state.settings.keybinds, to: state)
         if popover.contentViewController == nil {
             let host = NSHostingController(rootView: ControlPanel(state: state))
             // without this the controller never reports the SwiftUI size, and the popover is

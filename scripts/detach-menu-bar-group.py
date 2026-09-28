@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Restore AeriaLite's menu bar icon when macOS has grouped it under another app.
 
-macOS 26 files a status item under the application responsible for the process that
+macOS 27 files a status item under the application responsible for the process that
 created it, and refuses to place items belonging to a group the user has not allowed
 to add menu bar items. An installer or agent that launches AeriaLite therefore welds
 it to that tool permanently: the grouping is stored by bundle id in trackedApplications

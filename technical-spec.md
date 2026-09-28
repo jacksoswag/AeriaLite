@@ -1,6 +1,6 @@
 # AeriaLite technical spec
 
-AeriaLite is a macOS 26 menu agent plus a native Wallpaper Extension. The app owns catalogue,
+AeriaLite is a macOS 27 menu agent plus a native Wallpaper Extension. The app owns catalogue,
 downloads, cache policy, and controls. `WallpaperAgent` owns desktop placement and hosts the
 extension process. No AppKit desktop window or renderer fallback remains.
 
@@ -15,8 +15,8 @@ The app executable supports four commands.
 | `aerialite catalog` | imports Apple's macOS aerial manifest |
 | `aerialite activate-native` | registers, selects, and health-checks the extension |
 
-`scripts/bundle.sh` also builds `AeriaLiteWallpaperExtension.appex`. It builds with stable Xcode 26,
-targets macOS 26, and requires the macOS 26 SDK. The build script fails explicitly on an unsupported
+`scripts/bundle.sh` also builds `AeriaLiteWallpaperExtension.appex`. It builds with Xcode 27,
+targets macOS 27, and requires the macOS 27 SDK. The build script fails explicitly on an unsupported
 SDK, verifies the SDK stamp, entry point, and nested signature, and never
 substitutes the removed window renderer. It gives both bundles a unique timestamp build number so
 PluginKit can distinguish rebuilds.
@@ -36,7 +36,7 @@ missing or mismatched team identifiers before changing the installed app or wall
 
 ## Native framework boundary
 
-macOS 26 hosts wallpapers through `WallpaperExtensionKit`, a private *Swift* framework. Its
+macOS 27 hosts wallpapers through `WallpaperExtensionKit`, a private *Swift* framework. Its
 `WallpaperExtension` protocol refines `ExtensionFoundation.AppExtension` with one requirement,
 `makeWallpaper(request:host:)`, and supplies the `AppExtensionConfiguration` itself. That
 configuration is the framework's own type: an extension that vends any other one is not recognised
@@ -168,7 +168,7 @@ and refusing does not fall back to a capture of the layer. It leaves whatever wa
 which reads exactly like an extension that never activated.
 
 Activation writes the same selection into both slots of every store section. `Desktop` is the
-wallpaper; `Idle` is what macOS 26 presents once the Mac is left alone, and it defaults to Apple's
+wallpaper; `Idle` is what macOS 27 presents once the Mac is left alone, and it defaults to Apple's
 own aerial, so filling only `Desktop` leaves an untouched Mac showing Apple's footage over a
 backend still decoding underneath.
 
@@ -181,7 +181,7 @@ wallpaper store, unregisters the failed bundle, and restarts services on that re
 
 ## Menu bar item
 
-On macOS 26 an `NSStatusItem` is not a window this process owns. AppKit requests an `FBSScene` from
+On macOS 27 an `NSStatusItem` is not a window this process owns. AppKit requests an `FBSScene` from
 `com.apple.controlcenter.statusitems` and exports the button into it, so the item is hosted inside
 ControlCenter and appears in `CGWindowListCopyWindowInfo` as a level-25 window belonging to *that*
 process. `button.window` in this process is a detached host that never reports menu bar coordinates.

@@ -1,4 +1,5 @@
 import AVFoundation
+import ExtensionFoundation
 import Foundation
 import QuartzCore
 import WallpaperExtensionKit
@@ -130,7 +131,7 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
         for deck in decks { root.addSublayer(deck.layer) }
 
         endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main
+            forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil, queue: .main
         ) { [weak self] note in
             MainActor.assumeIsolated {
                 // During a blend the active deck is already the incoming clip, so the outgoing

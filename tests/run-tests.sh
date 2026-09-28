@@ -82,7 +82,7 @@ perf() {
   codesign --verify --deep --strict "$app" 2>/dev/null
   check "bundle signature" "$?" "0"
   check "extension sdk" "$(xcrun vtool -show-build "$extension_bin" 2>/dev/null \
-    | awk '$1 == "sdk" { print $2; exit }')" "26.5"
+    | awk '$1 == "sdk" { print $2; exit }')" "$(xcrun --sdk macosx --show-sdk-version)"
   local provider_count
   provider_count="$(plutil -convert xml1 -o - \
     "$HOME/Library/Application Support/com.apple.wallpaper/Store/Index.plist" 2>/dev/null \

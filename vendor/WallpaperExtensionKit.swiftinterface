@@ -1,7 +1,7 @@
 // swift-interface-format-version: 1.0
-// swift-module-flags: -target arm64-apple-macos26.0 -enable-objc-interop -enable-library-evolution -swift-version 5 -module-name WallpaperExtensionKit
+// swift-module-flags: -target arm64-apple-macos27.0 -enable-objc-interop -enable-library-evolution -swift-version 5 -module-name WallpaperExtensionKit
 
-// Hand-reconstructed declarations for the macOS 26 private WallpaperExtensionKit module.
+// Hand-reconstructed declarations for the macOS 27 private WallpaperExtensionKit module.
 //
 // The framework ships a .tbd in the SDK and a binary in the shared cache, but no .swiftmodule, so
 // there is nothing to import and nothing to conform to. Everything below is transcribed from the

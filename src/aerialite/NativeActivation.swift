@@ -8,9 +8,6 @@ enum NativeActivation {
         "Library/Application Support/com.apple.wallpaper/Store/Index.plist")
 
     static func activate() throws {
-        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 else {
-            throw Failure("native AeriaLite wallpapers require macOS 26 or newer")
-        }
         let builtIn = Bundle.main.bundleURL.appendingPathComponent(
             "Contents/Extensions/AeriaLiteWallpaperExtension.appex")
         guard FileManager.default.fileExists(atPath: builtIn.path) else {
@@ -182,7 +179,7 @@ enum NativeActivation {
         _ = try? run("/usr/bin/killall", ["Dock"])
     }
 
-    /// Each store section carries two slots. `Desktop` is the wallpaper; `Idle` is what macOS 26
+    /// Each store section carries two slots. `Desktop` is the wallpaper; `Idle` is what macOS 27
     /// presents once the Mac has been left alone, and it defaults to Apple's own aerial. Filling
     /// only `Desktop` leaves an untouched Mac showing Apple's footage over a backend that is still
     /// decoding underneath, which is both wrong to look at and wasteful, so both slots take the

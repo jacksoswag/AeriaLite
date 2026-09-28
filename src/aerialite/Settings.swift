@@ -25,6 +25,26 @@ struct Settings: Codable {
         }
     }
 
+    /// System-wide shortcuts, one chord each, such as `f9` or `cmd+shift+right`. An empty string
+    /// turns that one off; a key left out keeps its default.
+    struct Keybinds: Codable, Equatable {
+        var next = "f9"
+        var previous = "f7"
+        var playPause = "f8"
+        var backdrop = "f10"            // film and Spotify, as the panel's backdrop button does
+        var quit = "f10"                // double-tapped; may share a chord with any of the above
+
+        init() {}
+        init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            next = try c.decodeIfPresent(String.self, forKey: .next) ?? next
+            previous = try c.decodeIfPresent(String.self, forKey: .previous) ?? previous
+            playPause = try c.decodeIfPresent(String.self, forKey: .playPause) ?? playPause
+            backdrop = try c.decodeIfPresent(String.self, forKey: .backdrop) ?? backdrop
+            quit = try c.decodeIfPresent(String.self, forKey: .quit) ?? quit
+        }
+    }
+
     /// Streamed clips only. Whichever of the two limits binds first wins, unless capAtHigh asks
     /// for the looser one.
     struct Cache: Codable {
@@ -65,6 +85,7 @@ struct Settings: Codable {
     var spotifyBlur = 1.0
     var spotifyDistortion = 1.0
     var spotifySpeed = 1.0
+    var keybinds = Keybinds()
     static let slowBitsPerSecond = 5_000_000.0
 
     /// nil when unset or when nothing in it names a real filter, which is what lets the caller
@@ -81,7 +102,7 @@ struct Settings: Codable {
     /// Spelled as asked for rather than in this file's camelCase: they are the three keys meant
     /// to be found and edited by name.
     private enum CodingKeys: String, CodingKey {
-        case streams, downloads, defSpeed, maxCache, streamMode, transition, defaultView
+        case streams, downloads, defSpeed, maxCache, streamMode, transition, defaultView, keybinds
         case spotifyBlur = "spotify_blur_multiplier"
         case spotifyDistortion = "spotify_distortion_multiplier"
         case spotifySpeed = "spotify_speed_multiplier"
@@ -97,6 +118,7 @@ struct Settings: Codable {
         maxCache = try c.decodeIfPresent(Cache.self, forKey: .maxCache) ?? maxCache
         streamMode = try c.decodeIfPresent(Int.self, forKey: .streamMode) ?? streamMode
         transition = try c.decodeIfPresent(Transition.self, forKey: .transition) ?? transition
+        keybinds = try c.decodeIfPresent(Keybinds.self, forKey: .keybinds) ?? keybinds
         func multiplier(_ key: CodingKeys) -> Double {
             min(10, max(0, (try? c.decodeIfPresent(Double.self, forKey: key)) ?? 1))
         }

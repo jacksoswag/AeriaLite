@@ -7,7 +7,7 @@
 **Apple's aerial footage as a native macOS video wallpaper.**
 
 [![Swift](https://img.shields.io/badge/Swift-5-F05138?logo=swift&logoColor=white)](https://swift.org)
-[![Platform](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)](#install)
+[![Platform](https://img.shields.io/badge/macOS-27%2B-000000?logo=apple&logoColor=white)](#install)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-2ea043)](Package.swift)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -32,11 +32,11 @@ Aerial is the better choice if you want a screensaver, overlays, or live camera 
 
 ## Native wallpaper backend
 
-macOS 26 hosts wallpapers through `WallpaperExtensionKit`, a private Swift framework, and AeriaLite conforms to its `WallpaperExtension` protocol: it hands `WallpaperAgent` a `CALayer` and lets macOS own everything around it. It is the actual wallpaper—not a desktop-level window—so the white reveal gradient shown by the old path is gone; the menu bar samples the same content macOS is presenting, and Spaces, Mission Control, and the login screen are the system's problem rather than this code's.
+macOS 27 hosts wallpapers through `WallpaperExtensionKit`, a private Swift framework, and AeriaLite conforms to its `WallpaperExtension` protocol: it hands `WallpaperAgent` a `CALayer` and lets macOS own everything around it. It is the actual wallpaper—not a desktop-level window—so the white reveal gradient shown by the old path is gone; the menu bar samples the same content macOS is presenting, and Spaces, Mission Control, and the login screen are the system's problem rather than this code's.
 
 The SDK ships a link stub for that framework but no Swift module, so `vendor/WallpaperExtensionKit.swiftinterface` declares the subset AeriaLite uses, recovered from the shipped binary; [`technical-spec.md`](technical-spec.md) records how, and why the recovery is checkable rather than guessed. Aerial's public repository does not include its `Aerial4WallpaperExtension` target or backend source, so none of this came from there.
 
-It builds with stable Xcode 26 and targets macOS 26. The build stops on unsupported SDKs rather than producing an unverified native extension, and it never silently installs the retired AppKit renderer.
+It builds with Xcode 27 and targets macOS 27. The build stops on unsupported SDKs rather than producing an unverified native extension, and it never silently installs the retired AppKit renderer.
 
 ## How it stays off your disk
 
@@ -55,7 +55,7 @@ cd AeriaLite && ./scripts/install.sh
 
 Builds release, bundles `AeriaLite.app` into `~/Applications` and symlinks `aerialite` onto your PATH. It deliberately does not launch the app: open AeriaLite from Finder or Spotlight once, and it adds itself to Login Items so the wallpaper is up before you are. Remove it there to stop that. Set `APPS` or `BIN_DIR` to put either somewhere else.
 
-That first launch has to come from you rather than from the installer. macOS 26 files a menu bar item under whichever application is *responsible* for the process that created it, and an installer run from a terminal makes the terminal responsible. See [below](#if-the-menu-bar-icon-does-not-appear).
+That first launch has to come from you rather than from the installer. macOS 27 files a menu bar item under whichever application is *responsible* for the process that created it, and an installer run from a terminal makes the terminal responsible. See [below](#if-the-menu-bar-icon-does-not-appear).
 
 Installing selects AeriaLite for both the desktop and the idle screen macOS shows once the Mac is left alone; the latter otherwise stays on Apple's aerial and covers AeriaLite whenever you step away. System Settings > Wallpaper puts either back.
 
@@ -65,7 +65,7 @@ Then fill the library:
 aerialite catalog
 ```
 
-Requires macOS 26 and Xcode 26. The installer stages the bundle before replacing anything and
+Requires macOS 27 and Xcode 27. The installer stages the bundle before replacing anything and
 treats native registration plus a fresh extension heartbeat as mandatory. If activation fails, it
 restores the prior wallpaper selection and app but leaves AeriaLite stopped. There is deliberately
 no renderer fallback.
@@ -115,9 +115,21 @@ aerialite activate-native
   "defSpeed": 1,
   "spotify_blur_multiplier": 1,
   "spotify_distortion_multiplier": 1,
-  "spotify_speed_multiplier": 1
+  "spotify_speed_multiplier": 1,
+  "keybinds": { "next": "f9", "previous": "f7", "playPause": "f8", "backdrop": "f10",
+                "quit": "f10" }
 }
 ```
+
+`keybinds` are system-wide shortcuts for the transport: `next` and `previous` clip, `playPause`, and
+`backdrop`, which switches between the film and the Spotify background, and `quit`, which is a
+double tap. `quit` may share a key with one of the others, as it does by default: the first tap
+acts at once, and a second within a third of a second undoes it and quits AeriaLite. Each is one chord such as
+`f9`, `cmd+shift+right` or `ctrl+opt+space`; an empty string turns that one off, and a key left out
+keeps its default. They need no Accessibility permission. On a Mac keyboard F7 to F10 are the media
+keys unless *Use F1, F2, etc. keys as standard function keys* is on, so without that setting the
+defaults fire with fn held. A chord another app already owns is skipped and logged. Like the
+`spotify_*` multipliers, edits take effect the next time the panel opens.
 
 The three `spotify_*` multipliers (0 to 10) scale Liquify's Blur, Distortion and Motion speed for the
 desktop's Spotify background only; Spotify's own window keeps the settings as they are. They take
@@ -200,7 +212,7 @@ swift test
 src/aerialite/            menu app, transcoder, catalogue, cache and IPC
 src/wallpaper-extension/  native WallpaperAgent backend and the Liquify mirror
 vendor/                   reconstructed WallpaperExtensionKit interface
-scripts/                  install.sh, bundle.sh, make-icon.swift, astronaut.png,
+scripts/                  install.sh, bundle.sh, make-icon.swift,
                           wallpaper-extension.entitlements, detach-menu-bar-group.py
 tests/                    run-tests.sh --smk --perf, media-helper.swift, unit/, reports/
 technical-spec.md         native protocol, playback, downloads and storage
@@ -210,9 +222,9 @@ technical-spec.md         native protocol, playback, downloads and storage
 
 ## If the menu bar icon does not appear
 
-The wallpaper plays but there is no helmet in the menu bar, and nothing is logged by the app.
+The wallpaper plays but there is no moon in the menu bar, and nothing is logged by the app.
 
-macOS 26 does not give a status item a window in its own process. AppKit requests a scene from
+macOS 27 does not give a status item a window in its own process. AppKit requests a scene from
 `com.apple.controlcenter.statusitems` and exports the button into it, so Control Center owns
 placement — and Control Center groups each item under the application *responsible* for the process
 that created it. That grouping is persistent, keyed by bundle id, and stored as `trackedApplications`
