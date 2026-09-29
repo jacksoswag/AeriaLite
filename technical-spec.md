@@ -162,10 +162,12 @@ frames, presented frames, and transition frames. Decoder surfaces are retained t
 completion. These diagnostics distinguish a live process from a renderer supplying a live stream.
 
 `snapshot()` decodes a still separately, through `AVAssetImageGenerator` at the playhead, rather
-than reusing the playing frame. The host asks for it wherever it cannot run the layer—Mission
-Control, the wallpaper grid in System Settings, and the desktop itself while presentation is idle—
-and refusing does not fall back to a capture of the layer. It leaves whatever was on screen before,
-which reads exactly like an extension that never activated.
+than reusing the playing frame. When the menu app is stopped and there is no frame to decode, it
+returns an opaque black still. The host asks for a snapshot wherever it cannot run the layer—Mission
+Control, the wallpaper grid in System Settings, and the desktop itself while presentation is idle.
+Refusing that request does not fall back to a capture of the layer. On this Mac, the old refusal
+also coincided with Dock switching back to a full-screen app after arriving on the desktop; the
+black still eliminated that jump in repeated swipes.
 
 Activation writes the same selection into both slots of every store section. `Desktop` is the
 wallpaper; `Idle` is what macOS 27 presents once the Mac is left alone, and it defaults to Apple's

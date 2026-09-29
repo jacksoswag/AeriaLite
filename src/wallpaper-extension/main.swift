@@ -201,7 +201,19 @@ private final class NativeWallpaperSession: Wallpaper, @unchecked Sendable {
     nonisolated func snapshot() async throws -> WallpaperSnapshot {
         if let still = await mirrorStill() { return try WallpaperSnapshot(image: still) }
         guard let playing = await currentAsset() else {
-            throw NativeWallpaperError.nothingPlaying
+            // WallpaperAgent requests a snapshot even while the menu app is stopped. A failed
+            // snapshot leaves the desktop with no still for Space transitions and previews.
+            let space = CGColorSpaceCreateDeviceRGB()
+            guard let context = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8,
+                                          bytesPerRow: 4, space: space,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else {
+                throw NativeWallpaperError.nothingPlaying
+            }
+            context.setFillColor(CGColor(gray: 0, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+            guard let black = context.makeImage() else { throw NativeWallpaperError.nothingPlaying }
+            return try WallpaperSnapshot(image: black)
         }
         let generator = AVAssetImageGenerator(asset: playing.asset)
         generator.appliesPreferredTrackTransform = true
